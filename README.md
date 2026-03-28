@@ -126,4 +126,4 @@ python -m unittest discover -s tests -v
 
 ## 📄 License
 
-이 저장소는 `GPL-3.0-or-later` 기준으로 배포됩니다.
+이 저장소는 `GPL-2.0` 기준으로 배포됩니다.
