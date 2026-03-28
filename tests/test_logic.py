@@ -6,6 +6,7 @@ from core.logic import (
     adjusted_scale_from_bbox,
     circle_ratio,
     occupancy_status,
+    resolve_fill_color,
     sanitize_filename,
     scale_from_area,
     unique_output_path,
@@ -50,6 +51,11 @@ class LogicTests(unittest.TestCase):
         self.assertAlmostEqual(circle_ratio(0.01, 0.02), 0.05)
         self.assertAlmostEqual(circle_ratio(1.2, 0.8), 0.98)
         self.assertAlmostEqual(circle_ratio(0.44, 0.25), 0.44)
+
+    def test_resolve_fill_color_prefers_matching_attribute_rule(self):
+        rules = (("국보", "#AA3300"), ("사적", "#006699"))
+        self.assertEqual(resolve_fill_color("#CCCCCC", "사적", rules), "#006699")
+        self.assertEqual(resolve_fill_color("#CCCCCC", "보물", rules), "#CCCCCC")
 
     def test_sanitize_filename_preserves_letters_and_korean(self):
         self.assertEqual(sanitize_filename("유적:01/?"), "유적_01__")

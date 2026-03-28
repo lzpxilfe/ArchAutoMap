@@ -1,9 +1,9 @@
 [general]
 name=ArchAutoMap
-qgisMinimumVersion=3.40
+qgisMinimumVersion=3.28
 qgisMaximumVersion=3.99
 description=Preview and export one heritage polygon at a time on a numeric topographic base layer.
-version=0.1.0
+version=0.1.2
 author=lzpxilfe (balguljang2)
 email=
 license=GPL-2.0-only

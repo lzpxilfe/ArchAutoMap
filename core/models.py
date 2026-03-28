@@ -2,12 +2,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .constants import (
+    AUTO_LAYOUT_HEIGHT_MM,
+    AUTO_LAYOUT_WIDTH_MM,
+    DEFAULT_DPI,
+    DEFAULT_PREVIEW_DPI,
+    OUTPUT_MODE_FINAL_ONLY,
+)
+
+
+@dataclass(frozen=True)
+class AttributeColorRule:
+    value: str
+    fill_color_hex: str
+
 
 @dataclass(frozen=True)
 class StyleConfig:
+    enabled: bool
     fill_color_hex: str
     outline_color_hex: str
     outline_width_mm: float
+    attribute_field: str = ""
+    attribute_color_rules: tuple[AttributeColorRule, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -15,8 +32,8 @@ class LayoutConfig:
     mode: str
     layout_name: str = ""
     map_item_id: str = ""
-    page_width_mm: float = 105.0
-    page_height_mm: float = 80.0
+    page_width_mm: float = AUTO_LAYOUT_WIDTH_MM
+    page_height_mm: float = AUTO_LAYOUT_HEIGHT_MM
 
 
 @dataclass(frozen=True)
@@ -29,10 +46,10 @@ class ExportConfig:
     output_crs_authid: str
     style: StyleConfig
     layout: LayoutConfig
-    dpi: int = 300
-    output_mode: str = "final_only"
+    dpi: int = DEFAULT_DPI
+    output_mode: str = OUTPUT_MODE_FINAL_ONLY
     output_dir: str = ""
-    preview_dpi: int = 120
+    preview_dpi: int = DEFAULT_PREVIEW_DPI
 
 
 @dataclass(frozen=True)

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import os
 
-AUTO_LAYOUT_WIDTH_MM = 105.0
-AUTO_LAYOUT_HEIGHT_MM = 80.0
 TARGET_OCCUPANCY_RATIO = 0.60
 MIN_EXPORT_SCALE = 3000
 MAX_EXPORT_SCALE = 50000
@@ -98,6 +96,18 @@ def occupancy_status(occupancy_ratio: float) -> str:
 
 def circle_ratio(width_ratio: float, height_ratio: float) -> float:
     return clamp(max(width_ratio, height_ratio), 0.05, 0.98)
+
+
+def resolve_fill_color(
+    default_fill_color_hex: str,
+    attribute_value,
+    attribute_rules: tuple[tuple[str, str], ...] | list[tuple[str, str]] | None = None,
+) -> str:
+    normalized_value = "" if attribute_value in (None, "") else str(attribute_value).strip()
+    for rule_value, fill_color_hex in attribute_rules or ():
+        if normalized_value == str(rule_value).strip():
+            return fill_color_hex
+    return default_fill_color_hex
 
 
 def sanitize_filename(value: str) -> str:

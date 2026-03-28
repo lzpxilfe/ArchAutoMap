@@ -1,6 +1,6 @@
 # ArchAutoMap
 
-> QGIS 3.40 LTR용 문화유적 도면 자동화 플러그인
+> QGIS 3.x용 문화유적 도면 자동화 플러그인
 
 **Author:** `lzpxilfe (balguljang2)`  
 **License:** `GPL-2.0-only`
@@ -15,6 +15,8 @@
 - 📐 **면적 규칙표 + 점유율 보정**으로 너무 작거나 큰 도면 비율을 자동 조정
 - 🎯 **도면 점유율을 숫자와 원형 도식**으로 직관적으로 표시
 - 🧱 **원본 레이어를 건드리지 않고 임시 메모리 레이어로 렌더링**
+- 🎨 **기본은 원래 레이어 심볼 유지**, 필요할 때만 표현 설정 덮어쓰기
+- 🏷️ **표현 설정을 켠 경우 속성값별 채움색 규칙**을 `+` 버튼으로 추가 가능
 - 🖼️ **현재 유적 1건 출력**과 **전체 유적 일괄 출력** 모두 지원
 - 🧾 **기존 Layout 재사용** 또는 **자동 Layout 생성** 둘 다 지원
 
@@ -66,8 +68,8 @@ ArchAutoMap은 원본 레이어에 필터를 직접 걸지 않습니다.
 4. Layout 모드를 선택합니다.
    - `기존 Layout 사용`: 기존 Layout 이름과 `Map Item ID`를 선택
    - `자동 Layout 생성`: 105 x 80 mm 임시 Layout 사용
-5. 채움색, 외곽선 색, 외곽선 두께를 설정합니다.
-6. 검색창에서 유적명을 찾고 `현재 유적 미리보기`를 실행합니다.
+5. 필요할 때만 표현 설정을 켜고, 기본 채움색/외곽선 또는 속성값별 색상 규칙을 지정합니다.
+6. 검색창에 유적명을 2글자 이상 입력하고 `현재 유적 미리보기`를 실행합니다.
 7. 오른쪽 패널에서 점유율 수치와 원형 도식을 확인합니다.
 8. 출력 폴더와 출력 방식을 고릅니다.
 9. `현재 유적 JPG 출력` 또는 `전체 유적 일괄 출력`을 실행합니다.
@@ -108,7 +110,7 @@ ArchAutoMap은 원본 레이어에 필터를 직접 걸지 않습니다.
 
 ## ✅ 현재 구현 범위
 
-- QGIS 3.40 LTR 기준 구현
+- QGIS 3.x 기준 구현
 - JPG 출력 지원
 - 단건 미리보기 지원
 - 전체 유적 일괄 출력 지원
@@ -127,7 +129,7 @@ ArchAutoMap은 원본 레이어에 필터를 직접 걸지 않습니다.
 
 **Recommended citation**
 
-`lzpxilfe (balguljang2). ArchAutoMap (v0.1.0). QGIS plugin for archaeological single-feature map preview and JPG export. https://github.com/lzpxilfe/ArchAutoMap`
+`lzpxilfe (balguljang2). ArchAutoMap (v0.1.2). QGIS plugin for archaeological single-feature map preview and JPG export. https://github.com/lzpxilfe/ArchAutoMap`
 
 ## 🧪 개발/검증
 

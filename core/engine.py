@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
+    QgsExpression,
     QgsFeature,
     QgsFeatureRequest,
     QgsFillSymbol,
@@ -22,16 +23,33 @@ from qgis.core import (
     QgsVectorLayer,
 )
 
+from .constants import (
+    AUTO_LAYOUT_NAME,
+    AUTO_MAP_ITEM_ID,
+    MAX_FEATURE_SEARCH_RESULTS,
+    MEMORY_LAYER_PROVIDER,
+    MIN_FEATURE_SEARCH_CHARS,
+    MULTI_POLYGON_GEOMETRY_NAME,
+    POLYGON_GEOMETRY_NAME,
+    SYMBOL_SIZE_UNIT_MM,
+    TRANSPARENT_FILL_COLOR,
+)
 from .logic import (
     adjusted_scale_from_bbox,
     circle_ratio,
     occupancy_ratios,
     occupancy_status,
+    resolve_fill_color,
     sanitize_filename,
     scale_from_area,
     unique_output_path,
 )
-from .models import ExportConfig, ExportSummary, FeatureChoice, PreviewMetrics
+from .models import (
+    ExportConfig,
+    ExportSummary,
+    FeatureChoice,
+    PreviewMetrics,
+)
 
 
 class ArchAutoMapError(RuntimeError):
@@ -138,25 +156,30 @@ class ArchAutoMapEngine:
         fill_layer_id: str,
         name_field: str,
         search_text: str = "",
+        max_results: int = MAX_FEATURE_SEARCH_RESULTS,
+        minimum_search_chars: int = MIN_FEATURE_SEARCH_CHARS,
     ) -> list[FeatureChoice]:
         layer = self._require_vector_layer(fill_layer_id, "유적 채움")
         if not name_field or layer.fields().indexOf(name_field) < 0:
             return []
 
         lowered_search = search_text.strip().lower()
+        if len(lowered_search) < minimum_search_chars:
+            return []
+
         name_counts: dict[str, int] = {}
         features: list[tuple[int, str]] = []
-        request = QgsFeatureRequest().setSubsetOfAttributes(
-            [layer.fields().indexOf(name_field)],
-            layer.fields(),
+        request = (
+            QgsFeatureRequest()
+            .setFilterExpression(self._contains_expression(name_field, lowered_search))
+            .setSubsetOfAttributes([layer.fields().indexOf(name_field)], layer.fields())
+            .setLimit(max_results)
         )
 
         for feature in layer.getFeatures(request):
             raw_name = feature[name_field]
             name = str(raw_name).strip() if raw_name not in (None, "") else ""
             if not name:
-                continue
-            if lowered_search and lowered_search not in name.lower():
                 continue
             name_counts[name] = name_counts.get(name, 0) + 1
             features.append((feature.id(), name))
@@ -173,7 +196,11 @@ class ArchAutoMapEngine:
 
     def preview_feature(self, config: ExportConfig, feature_id: int) -> PreviewMetrics:
         feature = self._get_fill_feature(config, feature_id)
-        outline_lookup = self._build_outline_lookup(config)
+        outline_lookup = self._build_outline_lookup(
+            config,
+            feature_name=self._feature_name(feature, config.name_field),
+            max_matches=2,
+        )
         prepared = self._prepare_render(config, feature, outline_lookup)
 
         image_file = tempfile.NamedTemporaryFile(
@@ -193,7 +220,11 @@ class ArchAutoMapEngine:
 
     def export_current(self, config: ExportConfig, feature_id: int) -> list[str]:
         feature = self._get_fill_feature(config, feature_id)
-        outline_lookup = self._build_outline_lookup(config)
+        outline_lookup = self._build_outline_lookup(
+            config,
+            feature_name=self._feature_name(feature, config.name_field),
+            max_matches=2,
+        )
         return self._export_feature(config, feature, outline_lookup, set())
 
     def export_all(self, config: ExportConfig, progress_callback=None) -> ExportSummary:
@@ -312,18 +343,22 @@ class ArchAutoMapEngine:
         occupancy_ratio = max(width_ratio, height_ratio)
         occupancy_label = occupancy_status(occupancy_ratio)
         extent = self._extent_from_bbox_center(bbox, final_scale, map_width_mm, map_height_mm)
+        fill_color_hex = self._resolve_fill_color(config, feature)
 
         temp_layers = [
             self._create_temp_fill_layer(
-                fill_geometry,
-                output_crs,
-                raw_name,
-                config,
+                source_layer=fill_layer,
+                source_feature=feature,
+                geometry=fill_geometry,
+                output_crs=output_crs,
+                name=raw_name,
+                config=config,
+                fill_color_hex=fill_color_hex,
                 include_outline=outline_layer is None,
             )
         ]
         if outline_layer is not None:
-            outline_geometry = self._resolve_outline_geometry(
+            outline_feature, outline_geometry = self._resolve_outline_feature(
                 outline_layer,
                 output_crs,
                 raw_name,
@@ -332,10 +367,13 @@ class ArchAutoMapEngine:
             )
             temp_layers.append(
                 self._create_temp_outline_layer(
-                    outline_geometry,
-                    output_crs,
-                    raw_name,
-                    config,
+                    source_layer=outline_layer if outline_feature is not None else fill_layer,
+                    source_feature=outline_feature if outline_feature is not None else feature,
+                    geometry=outline_geometry,
+                    output_crs=output_crs,
+                    name=raw_name,
+                    config=config,
+                    use_style_override=(config.style.enabled or outline_feature is None),
                 )
             )
 
@@ -391,6 +429,8 @@ class ArchAutoMapEngine:
     def _build_outline_lookup(
         self,
         config: ExportConfig,
+        feature_name: str | None = None,
+        max_matches: int | None = None,
     ) -> dict[str, list[QgsFeature]] | None:
         if not config.outline_layer_id:
             return None
@@ -401,10 +441,19 @@ class ArchAutoMapEngine:
             return None
 
         lookup: dict[str, list[QgsFeature]] = {}
-        request = QgsFeatureRequest().setSubsetOfAttributes(
-            [outline_layer.fields().indexOf(config.name_field)],
-            outline_layer.fields(),
-        )
+        request = QgsFeatureRequest()
+        if feature_name:
+            request.setFilterExpression(
+                QgsExpression.createFieldEqualityExpression(config.name_field, feature_name)
+            )
+        else:
+            request.setSubsetOfAttributes(
+                [outline_layer.fields().indexOf(config.name_field)],
+                outline_layer.fields(),
+            )
+        if max_matches:
+            request.setLimit(max_matches)
+
         for feature in outline_layer.getFeatures(request):
             raw_name = feature[config.name_field]
             name = str(raw_name).strip() if raw_name not in (None, "") else ""
@@ -413,29 +462,55 @@ class ArchAutoMapEngine:
             lookup.setdefault(name, []).append(QgsFeature(feature))
         return lookup
 
-    def _resolve_outline_geometry(
+    def _contains_expression(self, field_name: str, lowered_search: str) -> str:
+        escaped_field = field_name.replace('"', '""')
+        escaped_value = lowered_search.replace("'", "''")
+        return f"lower(\"{escaped_field}\") LIKE '%{escaped_value}%'"
+
+    def _resolve_fill_color(self, config: ExportConfig, source_feature: QgsFeature) -> str:
+        if not config.style.enabled:
+            return config.style.fill_color_hex
+
+        if not config.style.attribute_field or not config.style.attribute_color_rules:
+            return config.style.fill_color_hex
+
+        if config.style.attribute_field not in source_feature.fields().names():
+            self.log(
+                f"표현 기준 필드가 현재 유적에 없어 기본 채움색을 사용합니다: {config.style.attribute_field}"
+            )
+            return config.style.fill_color_hex
+
+        attribute_value = source_feature[config.style.attribute_field]
+        rules = tuple(
+            (rule.value, rule.fill_color_hex) for rule in config.style.attribute_color_rules
+        )
+        return resolve_fill_color(config.style.fill_color_hex, attribute_value, rules)
+
+    def _resolve_outline_feature(
         self,
         outline_layer: QgsVectorLayer,
         output_crs: QgsCoordinateReferenceSystem,
         name: str,
         fallback_geometry: QgsGeometry,
         outline_lookup: dict[str, list[QgsFeature]] | None,
-    ) -> QgsGeometry:
+    ) -> tuple[QgsFeature | None, QgsGeometry]:
         if outline_lookup is None:
-            return QgsGeometry(fallback_geometry)
+            return None, QgsGeometry(fallback_geometry)
 
         matches = outline_lookup.get(name, [])
         if len(matches) != 1:
             if len(matches) > 1:
                 self.log(f"외곽선 '{name}' 이(가) 중복되어 채움 geometry를 재사용합니다.")
-            return QgsGeometry(fallback_geometry)
+            else:
+                self.log(f"외곽선 '{name}' 을(를) 찾지 못해 채움 geometry를 재사용합니다.")
+            return None, QgsGeometry(fallback_geometry)
 
         outline_feature = matches[0]
         geometry = self._transform_geometry(outline_feature.geometry(), outline_layer.crs(), output_crs)
         if geometry.isEmpty():
             self.log(f"외곽선 '{name}' geometry가 비어 있어 채움 geometry를 재사용합니다.")
-            return QgsGeometry(fallback_geometry)
-        return geometry
+            return None, QgsGeometry(fallback_geometry)
+        return QgsFeature(outline_feature), geometry
 
     def _list_named_features(self, fill_layer: QgsVectorLayer, name_field: str) -> list[QgsFeature]:
         if fill_layer.fields().indexOf(name_field) < 0:
@@ -497,7 +572,7 @@ class ArchAutoMapEngine:
 
         layout = QgsPrintLayout(self.project)
         layout.initializeDefaults()
-        layout.setName("ArchAutoMap Preview")
+        layout.setName(AUTO_LAYOUT_NAME)
         layout.setUnits(QgsUnitTypes.LayoutUnit.LayoutMillimeters)
 
         page = layout.pageCollection().page(0)
@@ -510,7 +585,7 @@ class ArchAutoMapEngine:
         )
 
         map_item = QgsLayoutItemMap(layout)
-        map_item.setId("archautomap_map")
+        map_item.setId(AUTO_MAP_ITEM_ID)
         map_item.attemptMove(
             QgsLayoutPoint(0, 0, QgsUnitTypes.LayoutUnit.LayoutMillimeters)
         )
@@ -569,64 +644,94 @@ class ArchAutoMapEngine:
         map_item.refresh()
         layout.refresh()
 
+    def _create_temp_feature_layer(
+        self,
+        source_layer: QgsVectorLayer,
+        source_feature: QgsFeature,
+        geometry: QgsGeometry,
+        output_crs: QgsCoordinateReferenceSystem,
+        name: str,
+    ) -> QgsVectorLayer:
+        layer = QgsVectorLayer(
+            self._memory_polygon_uri(geometry, output_crs.authid()),
+            name,
+            MEMORY_LAYER_PROVIDER,
+        )
+        provider = layer.dataProvider()
+        provider.addAttributes(list(source_layer.fields()))
+        layer.updateFields()
+
+        feature = QgsFeature(layer.fields())
+        feature.setAttributes(list(source_feature.attributes()))
+        feature.setGeometry(geometry)
+        provider.addFeature(feature)
+        layer.updateExtents()
+        if hasattr(layer, "setOpacity"):
+            layer.setOpacity(source_layer.opacity())
+        return layer
+
     def _create_temp_fill_layer(
         self,
+        source_layer: QgsVectorLayer,
+        source_feature: QgsFeature,
         geometry: QgsGeometry,
         output_crs: QgsCoordinateReferenceSystem,
         name: str,
         config: ExportConfig,
+        fill_color_hex: str,
         include_outline: bool,
     ) -> QgsVectorLayer:
-        layer = QgsVectorLayer(
-            self._memory_polygon_uri(geometry, output_crs.authid()),
-            f"ArchAutoMap Fill {name}",
-            "memory",
+        layer = self._create_temp_feature_layer(
+            source_layer=source_layer,
+            source_feature=source_feature,
+            geometry=geometry,
+            output_crs=output_crs,
+            name=f"ArchAutoMap Fill {name}",
         )
-        provider = layer.dataProvider()
-        feature = QgsFeature()
-        feature.setGeometry(geometry)
-        provider.addFeature(feature)
-        layer.updateExtents()
-
-        symbol_props = {
-            "color": config.style.fill_color_hex,
-            "outline_color": config.style.outline_color_hex,
-            "outline_width": str(config.style.outline_width_mm),
-            "outline_width_unit": "MM",
-        }
-        if not include_outline:
-            symbol_props["outline_style"] = "no"
-        layer.renderer().setSymbol(QgsFillSymbol.createSimple(symbol_props))
+        if config.style.enabled:
+            symbol_props = {
+                "color": fill_color_hex,
+                "outline_color": config.style.outline_color_hex,
+                "outline_width": str(config.style.outline_width_mm),
+                "outline_width_unit": SYMBOL_SIZE_UNIT_MM,
+            }
+            if not include_outline:
+                symbol_props["outline_style"] = "no"
+            layer.renderer().setSymbol(QgsFillSymbol.createSimple(symbol_props))
+        elif source_layer.renderer() is not None:
+            layer.setRenderer(source_layer.renderer().clone())
         return layer
 
     def _create_temp_outline_layer(
         self,
+        source_layer: QgsVectorLayer,
+        source_feature: QgsFeature,
         geometry: QgsGeometry,
         output_crs: QgsCoordinateReferenceSystem,
         name: str,
         config: ExportConfig,
+        use_style_override: bool,
     ) -> QgsVectorLayer:
-        layer = QgsVectorLayer(
-            self._memory_polygon_uri(geometry, output_crs.authid()),
-            f"ArchAutoMap Outline {name}",
-            "memory",
+        layer = self._create_temp_feature_layer(
+            source_layer=source_layer,
+            source_feature=source_feature,
+            geometry=geometry,
+            output_crs=output_crs,
+            name=f"ArchAutoMap Outline {name}",
         )
-        provider = layer.dataProvider()
-        feature = QgsFeature()
-        feature.setGeometry(geometry)
-        provider.addFeature(feature)
-        layer.updateExtents()
-
-        layer.renderer().setSymbol(
-            QgsFillSymbol.createSimple(
-                {
-                    "color": "0,0,0,0",
-                    "outline_color": config.style.outline_color_hex,
-                    "outline_width": str(config.style.outline_width_mm),
-                    "outline_width_unit": "MM",
-                }
+        if use_style_override:
+            layer.renderer().setSymbol(
+                QgsFillSymbol.createSimple(
+                    {
+                        "color": TRANSPARENT_FILL_COLOR,
+                        "outline_color": config.style.outline_color_hex,
+                        "outline_width": str(config.style.outline_width_mm),
+                        "outline_width_unit": SYMBOL_SIZE_UNIT_MM,
+                    }
+                )
             )
-        )
+        elif source_layer.renderer() is not None:
+            layer.setRenderer(source_layer.renderer().clone())
         return layer
 
     def _transform_geometry(
@@ -646,7 +751,11 @@ class ArchAutoMapEngine:
         return new_geometry
 
     def _memory_polygon_uri(self, geometry: QgsGeometry, auth_id: str) -> str:
-        geometry_name = "MultiPolygon" if geometry.isMultipart() else "Polygon"
+        geometry_name = (
+            MULTI_POLYGON_GEOMETRY_NAME
+            if geometry.isMultipart()
+            else POLYGON_GEOMETRY_NAME
+        )
         return f"{geometry_name}?crs={auth_id}"
 
     def _require_layer(self, layer_id: str, label: str):

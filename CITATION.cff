@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use ArchAutoMap in research or reports, please cite it using the metadata below."
 title: "ArchAutoMap"
-version: "0.1.0"
+version: "0.1.2"
 type: software
 license: "GPL-2.0-only"
 authors:
