@@ -1,0 +1,1 @@
+# ArchAutoMap core package

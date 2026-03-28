@@ -1,0 +1,16 @@
+[general]
+name=ArchAutoMap
+qgisMinimumVersion=3.40
+qgisMaximumVersion=3.99
+description=Preview and export one heritage polygon at a time on a numeric topographic base layer.
+version=0.1.0
+author=nuri9 + Codex
+email=
+license=GPL-3.0-or-later
+about=ArchAutoMap helps archaeology workflows by isolating one heritage polygon at a time, fitting the map extent automatically, previewing layout occupancy, and exporting JPG outputs from either an existing layout or an auto-generated layout.
+category=Vector
+type=plugin
+tags=archaeology,cultural-heritage,layout,export,map,heritage
+icon=icon.png
+experimental=true
+deprecated=false

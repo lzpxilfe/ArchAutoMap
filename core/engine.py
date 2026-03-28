@@ -1,0 +1,672 @@
+from __future__ import annotations
+
+import os
+import tempfile
+from dataclasses import dataclass
+
+from qgis.core import (
+    QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
+    QgsFeature,
+    QgsFeatureRequest,
+    QgsFillSymbol,
+    QgsGeometry,
+    QgsLayoutExporter,
+    QgsLayoutItemMap,
+    QgsLayoutPoint,
+    QgsLayoutSize,
+    QgsPrintLayout,
+    QgsProject,
+    QgsRectangle,
+    QgsUnitTypes,
+    QgsVectorLayer,
+)
+
+from .logic import (
+    adjusted_scale_from_bbox,
+    circle_ratio,
+    occupancy_ratios,
+    occupancy_status,
+    sanitize_filename,
+    scale_from_area,
+    unique_output_path,
+)
+from .models import ExportConfig, ExportSummary, FeatureChoice, PreviewMetrics
+
+
+class ArchAutoMapError(RuntimeError):
+    pass
+
+
+@dataclass
+class _PreparedRender:
+    layout: QgsPrintLayout
+    map_item: QgsLayoutItemMap
+    base_layer: object
+    overlay_layers: list[QgsVectorLayer]
+    name: str
+    area_m2: float
+    scale: int
+    width_ratio: float
+    height_ratio: float
+    occupancy_ratio: float
+    occupancy_label: str
+    circle_ratio: float
+    temp_layer_ids: list[str]
+    original_state: "_MapItemState | None"
+
+    def to_preview_metrics(self, image_path: str) -> PreviewMetrics:
+        return PreviewMetrics(
+            name=self.name,
+            area_m2=self.area_m2,
+            scale=self.scale,
+            width_ratio=self.width_ratio,
+            height_ratio=self.height_ratio,
+            occupancy_ratio=self.occupancy_ratio,
+            occupancy_label=self.occupancy_label,
+            circle_ratio=self.circle_ratio,
+            image_path=image_path,
+        )
+
+
+class _MapItemState:
+    def __init__(self, map_item: QgsLayoutItemMap):
+        self.map_item = map_item
+        self.layers = list(map_item.layers() or [])
+        self.extent = QgsRectangle(map_item.extent())
+        self.crs = map_item.crs()
+        self.scale = map_item.scale()
+        self.keep_layer_set = (
+            map_item.keepLayerSet() if hasattr(map_item, "keepLayerSet") else None
+        )
+        self.follow_visibility_preset = (
+            map_item.followVisibilityPreset()
+            if hasattr(map_item, "followVisibilityPreset")
+            else None
+        )
+        self.follow_visibility_preset_name = (
+            map_item.followVisibilityPresetName()
+            if hasattr(map_item, "followVisibilityPresetName")
+            else None
+        )
+
+    def restore(self):
+        if self.keep_layer_set is not None and hasattr(self.map_item, "setKeepLayerSet"):
+            self.map_item.setKeepLayerSet(self.keep_layer_set)
+        if self.follow_visibility_preset is not None and hasattr(
+            self.map_item, "setFollowVisibilityPreset"
+        ):
+            self.map_item.setFollowVisibilityPreset(self.follow_visibility_preset)
+        if self.follow_visibility_preset_name is not None and hasattr(
+            self.map_item, "setFollowVisibilityPresetName"
+        ):
+            self.map_item.setFollowVisibilityPresetName(self.follow_visibility_preset_name)
+
+        self.map_item.setLayers(self.layers)
+        self.map_item.setCrs(self.crs)
+        self.map_item.setExtent(self.extent)
+        self.map_item.setScale(self.scale)
+        self.map_item.refresh()
+        if self.map_item.layout():
+            self.map_item.layout().refresh()
+
+
+class ArchAutoMapEngine:
+    def __init__(self, project=None, message_callback=None):
+        self.project = project or QgsProject.instance()
+        self.message_callback = message_callback or (lambda message: None)
+
+    def log(self, message: str):
+        self.message_callback(message)
+
+    def list_layout_names(self) -> list[str]:
+        return sorted(layout.name() for layout in self.project.layoutManager().printLayouts())
+
+    def list_map_item_ids(self, layout_name: str) -> list[str]:
+        layout = self.project.layoutManager().layoutByName(layout_name)
+        if layout is None:
+            return []
+
+        ids = []
+        for item in layout.items():
+            if isinstance(item, QgsLayoutItemMap) and item.id():
+                ids.append(item.id())
+        return sorted(ids)
+
+    def list_feature_choices(
+        self,
+        fill_layer_id: str,
+        name_field: str,
+        search_text: str = "",
+    ) -> list[FeatureChoice]:
+        layer = self._require_vector_layer(fill_layer_id, "유적 채움")
+        if not name_field or layer.fields().indexOf(name_field) < 0:
+            return []
+
+        lowered_search = search_text.strip().lower()
+        name_counts: dict[str, int] = {}
+        features: list[tuple[int, str]] = []
+        request = QgsFeatureRequest().setSubsetOfAttributes(
+            [layer.fields().indexOf(name_field)],
+            layer.fields(),
+        )
+
+        for feature in layer.getFeatures(request):
+            raw_name = feature[name_field]
+            name = str(raw_name).strip() if raw_name not in (None, "") else ""
+            if not name:
+                continue
+            if lowered_search and lowered_search not in name.lower():
+                continue
+            name_counts[name] = name_counts.get(name, 0) + 1
+            features.append((feature.id(), name))
+
+        ordered = sorted(features, key=lambda item: (item[1], item[0]))
+        return [
+            FeatureChoice(
+                feature_id=feature_id,
+                name=name,
+                label=f"{name} [fid:{feature_id}]" if name_counts[name] > 1 else name,
+            )
+            for feature_id, name in ordered
+        ]
+
+    def preview_feature(self, config: ExportConfig, feature_id: int) -> PreviewMetrics:
+        feature = self._get_fill_feature(config, feature_id)
+        outline_lookup = self._build_outline_lookup(config)
+        prepared = self._prepare_render(config, feature, outline_lookup)
+
+        image_file = tempfile.NamedTemporaryFile(
+            prefix="archautomap_preview_",
+            suffix=".jpg",
+            delete=False,
+        )
+        image_path = image_file.name
+        image_file.close()
+
+        try:
+            self._render_with_overlay(prepared)
+            self._export_layout_image(prepared.layout, image_path, config.preview_dpi)
+            return prepared.to_preview_metrics(image_path)
+        finally:
+            self._cleanup_render(prepared)
+
+    def export_current(self, config: ExportConfig, feature_id: int) -> list[str]:
+        feature = self._get_fill_feature(config, feature_id)
+        outline_lookup = self._build_outline_lookup(config)
+        return self._export_feature(config, feature, outline_lookup, set())
+
+    def export_all(self, config: ExportConfig, progress_callback=None) -> ExportSummary:
+        fill_layer = self._require_vector_layer(config.fill_layer_id, "유적 채움")
+        features = self._list_named_features(fill_layer, config.name_field)
+        outline_lookup = self._build_outline_lookup(config)
+
+        os.makedirs(config.output_dir, exist_ok=True)
+        total = len(features)
+        exported = 0
+        failed = 0
+        used_paths: set[str] = set()
+
+        for index, feature in enumerate(features, start=1):
+            name = self._feature_name(feature, config.name_field)
+            if progress_callback is not None:
+                progress_callback(index, total, name)
+
+            try:
+                self.log(f"[{index}/{total}] 출력 중: {name}")
+                self._export_feature(config, feature, outline_lookup, used_paths)
+                exported += 1
+            except Exception as exc:  # pylint: disable=broad-except
+                failed += 1
+                self.log(f"[{index}/{total}] 실패: {name} ({exc})")
+
+        return ExportSummary(
+            total=total,
+            exported=exported,
+            failed=failed,
+            output_dir=config.output_dir,
+        )
+
+    def _export_feature(
+        self,
+        config: ExportConfig,
+        feature: QgsFeature,
+        outline_lookup: dict[str, list[QgsFeature]] | None,
+        used_paths: set[str],
+    ) -> list[str]:
+        if not config.output_dir:
+            raise ArchAutoMapError("출력 폴더가 필요합니다.")
+
+        os.makedirs(config.output_dir, exist_ok=True)
+        prepared = self._prepare_render(config, feature, outline_lookup)
+        output_paths: list[str] = []
+        try:
+            stem = sanitize_filename(prepared.name)
+            if config.output_mode == "paired":
+                base_path = unique_output_path(config.output_dir, f"{stem}-1", ".jpg", used_paths)
+                overlay_path = unique_output_path(
+                    config.output_dir,
+                    f"{stem}-2",
+                    ".jpg",
+                    used_paths,
+                )
+                self._render_base_only(prepared)
+                self._export_layout_image(prepared.layout, base_path, config.dpi)
+                output_paths.append(base_path)
+
+                self._render_with_overlay(prepared)
+                self._export_layout_image(prepared.layout, overlay_path, config.dpi)
+                output_paths.append(overlay_path)
+            else:
+                final_path = unique_output_path(config.output_dir, stem, ".jpg", used_paths)
+                self._render_with_overlay(prepared)
+                self._export_layout_image(prepared.layout, final_path, config.dpi)
+                output_paths.append(final_path)
+        finally:
+            self._cleanup_render(prepared)
+
+        return output_paths
+
+    def _prepare_render(
+        self,
+        config: ExportConfig,
+        feature: QgsFeature,
+        outline_lookup: dict[str, list[QgsFeature]] | None,
+    ) -> _PreparedRender:
+        base_layer = self._require_layer(config.base_layer_id, "배경")
+        fill_layer = self._require_vector_layer(config.fill_layer_id, "유적 채움")
+        outline_layer = (
+            self._require_vector_layer(config.outline_layer_id, "유적 외곽선")
+            if config.outline_layer_id
+            else None
+        )
+        output_crs = self._resolve_output_crs(config.output_crs_authid)
+        layout, map_item, original_state = self._resolve_layout_target(config)
+
+        raw_name = self._feature_name(feature, config.name_field)
+        fill_geometry = self._transform_geometry(feature.geometry(), fill_layer.crs(), output_crs)
+        if fill_geometry.isEmpty():
+            raise ArchAutoMapError(f"빈 geometry입니다: {raw_name}")
+
+        area_m2 = self._resolve_area(config, feature, fill_geometry, fill_layer)
+        bbox = fill_geometry.boundingBox()
+        if bbox.width() <= 0 or bbox.height() <= 0:
+            raise ArchAutoMapError(f"유효하지 않은 bbox입니다: {raw_name}")
+
+        map_width_mm, map_height_mm = self._map_item_size_mm(map_item)
+        base_scale = scale_from_area(area_m2)
+        final_scale = adjusted_scale_from_bbox(
+            base_scale=base_scale,
+            feature_width_m=bbox.width(),
+            feature_height_m=bbox.height(),
+            map_width_mm=map_width_mm,
+            map_height_mm=map_height_mm,
+        )
+        width_ratio, height_ratio = occupancy_ratios(
+            feature_width_m=bbox.width(),
+            feature_height_m=bbox.height(),
+            scale=final_scale,
+            map_width_mm=map_width_mm,
+            map_height_mm=map_height_mm,
+        )
+        occupancy_ratio = max(width_ratio, height_ratio)
+        occupancy_label = occupancy_status(occupancy_ratio)
+        extent = self._extent_from_bbox_center(bbox, final_scale, map_width_mm, map_height_mm)
+
+        temp_layers = [
+            self._create_temp_fill_layer(
+                fill_geometry,
+                output_crs,
+                raw_name,
+                config,
+                include_outline=outline_layer is None,
+            )
+        ]
+        if outline_layer is not None:
+            outline_geometry = self._resolve_outline_geometry(
+                outline_layer,
+                output_crs,
+                raw_name,
+                fill_geometry,
+                outline_lookup,
+            )
+            temp_layers.append(
+                self._create_temp_outline_layer(
+                    outline_geometry,
+                    output_crs,
+                    raw_name,
+                    config,
+                )
+            )
+
+        temp_layer_ids = []
+        for layer in temp_layers:
+            self.project.addMapLayer(layer, False)
+            temp_layer_ids.append(layer.id())
+
+        self._configure_map_item(
+            map_item=map_item,
+            layout=layout,
+            output_crs=output_crs,
+            extent=extent,
+            scale=final_scale,
+            base_layer=base_layer,
+            overlay_layers=temp_layers,
+        )
+
+        return _PreparedRender(
+            layout=layout,
+            map_item=map_item,
+            base_layer=base_layer,
+            overlay_layers=temp_layers,
+            name=raw_name,
+            area_m2=area_m2,
+            scale=final_scale,
+            width_ratio=width_ratio,
+            height_ratio=height_ratio,
+            occupancy_ratio=occupancy_ratio,
+            occupancy_label=occupancy_label,
+            circle_ratio=circle_ratio(width_ratio, height_ratio),
+            temp_layer_ids=temp_layer_ids,
+            original_state=original_state,
+        )
+
+    def _render_base_only(self, prepared: _PreparedRender):
+        prepared.map_item.setLayers([prepared.base_layer])
+        prepared.map_item.refresh()
+        prepared.layout.refresh()
+
+    def _render_with_overlay(self, prepared: _PreparedRender):
+        prepared.map_item.setLayers([prepared.base_layer] + prepared.overlay_layers)
+        prepared.map_item.refresh()
+        prepared.layout.refresh()
+
+    def _cleanup_render(self, prepared: _PreparedRender):
+        for layer_id in prepared.temp_layer_ids:
+            if self.project.mapLayer(layer_id) is not None:
+                self.project.removeMapLayer(layer_id)
+        if prepared.original_state is not None:
+            prepared.original_state.restore()
+
+    def _build_outline_lookup(
+        self,
+        config: ExportConfig,
+    ) -> dict[str, list[QgsFeature]] | None:
+        if not config.outline_layer_id:
+            return None
+
+        outline_layer = self._require_vector_layer(config.outline_layer_id, "유적 외곽선")
+        if outline_layer.fields().indexOf(config.name_field) < 0:
+            self.log("외곽선 레이어에 유적명 필드가 없어 채움 geometry를 외곽선으로 재사용합니다.")
+            return None
+
+        lookup: dict[str, list[QgsFeature]] = {}
+        request = QgsFeatureRequest().setSubsetOfAttributes(
+            [outline_layer.fields().indexOf(config.name_field)],
+            outline_layer.fields(),
+        )
+        for feature in outline_layer.getFeatures(request):
+            raw_name = feature[config.name_field]
+            name = str(raw_name).strip() if raw_name not in (None, "") else ""
+            if not name:
+                continue
+            lookup.setdefault(name, []).append(QgsFeature(feature))
+        return lookup
+
+    def _resolve_outline_geometry(
+        self,
+        outline_layer: QgsVectorLayer,
+        output_crs: QgsCoordinateReferenceSystem,
+        name: str,
+        fallback_geometry: QgsGeometry,
+        outline_lookup: dict[str, list[QgsFeature]] | None,
+    ) -> QgsGeometry:
+        if outline_lookup is None:
+            return QgsGeometry(fallback_geometry)
+
+        matches = outline_lookup.get(name, [])
+        if len(matches) != 1:
+            if len(matches) > 1:
+                self.log(f"외곽선 '{name}' 이(가) 중복되어 채움 geometry를 재사용합니다.")
+            return QgsGeometry(fallback_geometry)
+
+        outline_feature = matches[0]
+        geometry = self._transform_geometry(outline_feature.geometry(), outline_layer.crs(), output_crs)
+        if geometry.isEmpty():
+            self.log(f"외곽선 '{name}' geometry가 비어 있어 채움 geometry를 재사용합니다.")
+            return QgsGeometry(fallback_geometry)
+        return geometry
+
+    def _list_named_features(self, fill_layer: QgsVectorLayer, name_field: str) -> list[QgsFeature]:
+        if fill_layer.fields().indexOf(name_field) < 0:
+            raise ArchAutoMapError("유적명 필드가 유적 채움 레이어에 없습니다.")
+
+        features = []
+        for feature in fill_layer.getFeatures():
+            if self._feature_name(feature, name_field):
+                features.append(QgsFeature(feature))
+        return sorted(features, key=lambda item: (self._feature_name(item, name_field), item.id()))
+
+    def _get_fill_feature(self, config: ExportConfig, feature_id: int) -> QgsFeature:
+        fill_layer = self._require_vector_layer(config.fill_layer_id, "유적 채움")
+        feature = next(fill_layer.getFeatures(QgsFeatureRequest().setFilterFid(feature_id)), None)
+        if feature is None:
+            raise ArchAutoMapError(f"선택한 유적을 찾을 수 없습니다. fid={feature_id}")
+        return QgsFeature(feature)
+
+    def _feature_name(self, feature: QgsFeature, name_field: str) -> str:
+        raw_name = feature[name_field] if name_field in feature.fields().names() else None
+        return str(raw_name).strip() if raw_name not in (None, "") else ""
+
+    def _resolve_area(
+        self,
+        config: ExportConfig,
+        feature: QgsFeature,
+        geometry: QgsGeometry,
+        fill_layer: QgsVectorLayer,
+    ) -> float:
+        if config.area_field and fill_layer.fields().indexOf(config.area_field) >= 0:
+            raw_area = feature[config.area_field]
+            if raw_area not in (None, ""):
+                try:
+                    return float(raw_area)
+                except (TypeError, ValueError):
+                    self.log(f"면적 필드 값을 해석하지 못해 geometry 면적으로 계산합니다: {raw_area}")
+        return float(geometry.area())
+
+    def _resolve_output_crs(self, auth_id: str) -> QgsCoordinateReferenceSystem:
+        crs = QgsCoordinateReferenceSystem(auth_id)
+        if not crs.isValid():
+            raise ArchAutoMapError(f"유효하지 않은 CRS입니다: {auth_id}")
+        if crs.isGeographic():
+            raise ArchAutoMapError("출력 CRS는 미터 기반 투영좌표계를 사용해야 합니다.")
+        return crs
+
+    def _resolve_layout_target(self, config: ExportConfig):
+        if config.layout.mode == "existing":
+            layout = self.project.layoutManager().layoutByName(config.layout.layout_name)
+            if layout is None:
+                raise ArchAutoMapError(f"Layout을 찾을 수 없습니다: {config.layout.layout_name}")
+
+            map_item = layout.itemById(config.layout.map_item_id)
+            if not isinstance(map_item, QgsLayoutItemMap):
+                raise ArchAutoMapError(
+                    f"지도 아이템을 찾을 수 없습니다: {config.layout.map_item_id}"
+                )
+            return layout, map_item, _MapItemState(map_item)
+
+        layout = QgsPrintLayout(self.project)
+        layout.initializeDefaults()
+        layout.setName("ArchAutoMap Preview")
+        layout.setUnits(QgsUnitTypes.LayoutUnit.LayoutMillimeters)
+
+        page = layout.pageCollection().page(0)
+        page.setPageSize(
+            QgsLayoutSize(
+                config.layout.page_width_mm,
+                config.layout.page_height_mm,
+                QgsUnitTypes.LayoutUnit.LayoutMillimeters,
+            )
+        )
+
+        map_item = QgsLayoutItemMap(layout)
+        map_item.setId("archautomap_map")
+        map_item.attemptMove(
+            QgsLayoutPoint(0, 0, QgsUnitTypes.LayoutUnit.LayoutMillimeters)
+        )
+        map_item.attemptResize(
+            QgsLayoutSize(
+                config.layout.page_width_mm,
+                config.layout.page_height_mm,
+                QgsUnitTypes.LayoutUnit.LayoutMillimeters,
+            )
+        )
+        layout.addLayoutItem(map_item)
+        return layout, map_item, None
+
+    def _map_item_size_mm(self, map_item: QgsLayoutItemMap) -> tuple[float, float]:
+        size = map_item.sizeWithUnits()
+        return float(size.width()), float(size.height())
+
+    def _extent_from_bbox_center(
+        self,
+        bbox: QgsRectangle,
+        scale: int,
+        map_width_mm: float,
+        map_height_mm: float,
+    ) -> QgsRectangle:
+        width_m = (map_width_mm * scale) / 1000.0
+        height_m = (map_height_mm * scale) / 1000.0
+        center = bbox.center()
+        half_width = width_m / 2.0
+        half_height = height_m / 2.0
+        return QgsRectangle(
+            center.x() - half_width,
+            center.y() - half_height,
+            center.x() + half_width,
+            center.y() + half_height,
+        )
+
+    def _configure_map_item(
+        self,
+        map_item: QgsLayoutItemMap,
+        layout: QgsPrintLayout,
+        output_crs: QgsCoordinateReferenceSystem,
+        extent: QgsRectangle,
+        scale: int,
+        base_layer,
+        overlay_layers: list[QgsVectorLayer],
+    ):
+        if hasattr(map_item, "setFollowVisibilityPreset"):
+            map_item.setFollowVisibilityPreset(False)
+        if hasattr(map_item, "setKeepLayerSet"):
+            map_item.setKeepLayerSet(True)
+
+        map_item.setLayers([base_layer] + overlay_layers)
+        map_item.setCrs(output_crs)
+        map_item.setExtent(extent)
+        map_item.setScale(scale)
+        map_item.refresh()
+        layout.refresh()
+
+    def _create_temp_fill_layer(
+        self,
+        geometry: QgsGeometry,
+        output_crs: QgsCoordinateReferenceSystem,
+        name: str,
+        config: ExportConfig,
+        include_outline: bool,
+    ) -> QgsVectorLayer:
+        layer = QgsVectorLayer(
+            self._memory_polygon_uri(geometry, output_crs.authid()),
+            f"ArchAutoMap Fill {name}",
+            "memory",
+        )
+        provider = layer.dataProvider()
+        feature = QgsFeature()
+        feature.setGeometry(geometry)
+        provider.addFeature(feature)
+        layer.updateExtents()
+
+        symbol_props = {
+            "color": config.style.fill_color_hex,
+            "outline_color": config.style.outline_color_hex,
+            "outline_width": str(config.style.outline_width_mm),
+            "outline_width_unit": "MM",
+        }
+        if not include_outline:
+            symbol_props["outline_style"] = "no"
+        layer.renderer().setSymbol(QgsFillSymbol.createSimple(symbol_props))
+        return layer
+
+    def _create_temp_outline_layer(
+        self,
+        geometry: QgsGeometry,
+        output_crs: QgsCoordinateReferenceSystem,
+        name: str,
+        config: ExportConfig,
+    ) -> QgsVectorLayer:
+        layer = QgsVectorLayer(
+            self._memory_polygon_uri(geometry, output_crs.authid()),
+            f"ArchAutoMap Outline {name}",
+            "memory",
+        )
+        provider = layer.dataProvider()
+        feature = QgsFeature()
+        feature.setGeometry(geometry)
+        provider.addFeature(feature)
+        layer.updateExtents()
+
+        layer.renderer().setSymbol(
+            QgsFillSymbol.createSimple(
+                {
+                    "color": "0,0,0,0",
+                    "outline_color": config.style.outline_color_hex,
+                    "outline_width": str(config.style.outline_width_mm),
+                    "outline_width_unit": "MM",
+                }
+            )
+        )
+        return layer
+
+    def _transform_geometry(
+        self,
+        geometry: QgsGeometry,
+        source_crs: QgsCoordinateReferenceSystem,
+        output_crs: QgsCoordinateReferenceSystem,
+    ) -> QgsGeometry:
+        new_geometry = QgsGeometry(geometry)
+        if source_crs != output_crs:
+            transform = QgsCoordinateTransform(
+                source_crs,
+                output_crs,
+                self.project.transformContext(),
+            )
+            new_geometry.transform(transform)
+        return new_geometry
+
+    def _memory_polygon_uri(self, geometry: QgsGeometry, auth_id: str) -> str:
+        geometry_name = "MultiPolygon" if geometry.isMultipart() else "Polygon"
+        return f"{geometry_name}?crs={auth_id}"
+
+    def _require_layer(self, layer_id: str, label: str):
+        layer = self.project.mapLayer(layer_id)
+        if layer is None:
+            raise ArchAutoMapError(f"{label} 레이어를 찾을 수 없습니다.")
+        return layer
+
+    def _require_vector_layer(self, layer_id: str | None, label: str) -> QgsVectorLayer:
+        if not layer_id:
+            raise ArchAutoMapError(f"{label} 레이어가 선택되지 않았습니다.")
+        layer = self.project.mapLayer(layer_id)
+        if layer is None or not isinstance(layer, QgsVectorLayer):
+            raise ArchAutoMapError(f"{label} 레이어가 유효한 벡터 레이어가 아닙니다.")
+        return layer
+
+    def _export_layout_image(self, layout: QgsPrintLayout, path: str, dpi: int):
+        exporter = QgsLayoutExporter(layout)
+        settings = QgsLayoutExporter.ImageExportSettings()
+        settings.dpi = dpi
+        result = exporter.exportToImage(path, settings)
+        if result not in (0, getattr(QgsLayoutExporter, "Success", 0)) or not os.path.exists(path):
+            raise ArchAutoMapError(f"이미지 내보내기에 실패했습니다: {path}")
