@@ -20,6 +20,7 @@ from qgis.PyQt.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QDoubleSpinBox,
     QVBoxLayout,
@@ -95,7 +96,11 @@ class ArchAutoMapDockWidget(QDockWidget):
         super().closeEvent(event)
 
     def _build_ui(self):
-        container = QWidget(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        container = QWidget(scroll)
         root = QVBoxLayout(container)
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(10)
@@ -104,9 +109,11 @@ class ArchAutoMapDockWidget(QDockWidget):
         root.addWidget(self._build_style_group())
         root.addWidget(self._build_preview_group())
         root.addWidget(self._build_export_group())
-        root.addWidget(self._build_log_group(), stretch=1)
+        root.addWidget(self._build_log_group())
+        root.addStretch(1)
 
-        self.setWidget(container)
+        scroll.setWidget(container)
+        self.setWidget(scroll)
 
     def _build_input_group(self):
         group = QGroupBox("입력 설정")
@@ -248,6 +255,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         layout = QVBoxLayout(group)
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
+        self.log_edit.setMinimumHeight(140)
         layout.addWidget(self.log_edit)
         return group
 

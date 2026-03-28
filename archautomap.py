@@ -13,21 +13,31 @@ class ArchAutoMap:
     def __init__(self, iface):
         self.iface = iface
         self.action = None
+        self.toolbar = None
         self.dock_widget = None
 
     def initGui(self):
         icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
         self.action = QAction(QIcon(icon_path), "ArchAutoMap", self.iface.mainWindow())
+        self.action.setObjectName("ArchAutoMapAction")
+        self.action.setIconVisibleInMenu(True)
         self.action.triggered.connect(self.show_dock)
-        self.iface.addToolBarIcon(self.action)
+
+        self.toolbar = self.iface.addToolBar("ArchAutoMap")
+        self.toolbar.setObjectName("ArchAutoMapToolbar")
+        self.toolbar.addAction(self.action)
         self.iface.addPluginToMenu("ArchAutoMap", self.action)
 
     def unload(self):
         if self.action is not None:
-            self.iface.removeToolBarIcon(self.action)
             self.iface.removePluginMenu("ArchAutoMap", self.action)
             self.action.deleteLater()
             self.action = None
+
+        if self.toolbar is not None:
+            self.iface.mainWindow().removeToolBar(self.toolbar)
+            self.toolbar.deleteLater()
+            self.toolbar = None
 
         if self.dock_widget is not None:
             self.iface.removeDockWidget(self.dock_widget)

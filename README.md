@@ -2,6 +2,9 @@
 
 > QGIS 3.40 LTR용 문화유적 도면 자동화 플러그인
 
+**Author:** `lzpxilfe (balguljang2)`  
+**License:** `GPL-2.0-only`
+
 `ArchAutoMap`은 수백 개의 유적이 들어 있는 폴리곤 레이어에서 **현재 보고 싶은 유적 1건만 깔끔하게 분리해** 수치지형도 위에 배치하고, 자동 축척과 중심 정렬을 적용해 **JPG 도면으로 빠르게 출력**할 수 있게 돕는 플러그인입니다.
 
 ## ✨ 핵심 기능
@@ -53,6 +56,7 @@ ArchAutoMap은 원본 레이어에 필터를 직접 걸지 않습니다.
    - `C:\Users\<사용자명>\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\ArchAutoMap`
 3. QGIS를 다시 시작합니다.
 4. `플러그인 관리 및 설치`에서 `ArchAutoMap`을 활성화합니다.
+5. 활성화 후 상단에 `ArchAutoMap` 전용 툴바가 보이지 않으면 QGIS를 한 번 더 재시작합니다.
 
 ## 🛠️ 사용 순서
 
@@ -99,6 +103,7 @@ ArchAutoMap은 원본 레이어에 필터를 직접 걸지 않습니다.
 - `core/engine.py`: 레이어 복제, extent 계산, 렌더링, 출력 엔진
 - `core/logic.py`: 축척/점유율/파일명 순수 로직
 - `core/settings.py`: 사용자 설정 저장
+- `CITATION.cff`: 인용 메타데이터
 - `tests/test_logic.py`: 핵심 로직 테스트
 
 ## ✅ 현재 구현 범위
@@ -116,6 +121,14 @@ ArchAutoMap은 원본 레이어에 필터를 직접 걸지 않습니다.
 - 배치 출력 중 실패한 유적은 로그에 남기고 다음 유적으로 계속 진행합니다.
 - PDF 출력, 부분 선택 배치 출력, 더 다양한 템플릿 기능은 후속 버전에서 확장할 수 있습니다.
 
+## 📚 Citation
+
+연구, 보고서, 발표 자료에서 ArchAutoMap을 사용했다면 아래 저장소 또는 `CITATION.cff` 기준으로 인용해 주세요.
+
+**Recommended citation**
+
+`lzpxilfe (balguljang2). ArchAutoMap (v0.1.0). QGIS plugin for archaeological single-feature map preview and JPG export. https://github.com/lzpxilfe/ArchAutoMap`
+
 ## 🧪 개발/검증
 
 현재 저장소에는 축척/점유율/파일명 로직을 검증하는 단위 테스트가 포함되어 있습니다.
@@ -126,4 +139,4 @@ python -m unittest discover -s tests -v
 
 ## 📄 License
 
-이 저장소는 `GPL-2.0` 기준으로 배포됩니다.
+이 저장소는 `GPL-2.0-only` 기준으로 배포됩니다.
