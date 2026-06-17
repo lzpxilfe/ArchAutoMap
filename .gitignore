@@ -3,3 +3,10 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
+
+# 임시 미리보기 이미지
+archautomap_preview_*.jpg
+
+# IDE
+.vscode/
+.idea/
