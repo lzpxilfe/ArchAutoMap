@@ -220,24 +220,24 @@ class CollapsibleSection(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # 헤더 토글 버튼
-        self._btn = QPushButton(f"▶   {title}")
+        # 헤더 토글 버튼 — slim inline 스타일
+        self._btn = QPushButton(f"▶  {title}")
         self._btn.setObjectName("CollapsibleHeader")
         self._btn.setCheckable(True)
         self._btn.setChecked(False)
         self._btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._btn.setMinimumHeight(36)
+        self._btn.setFixedHeight(22)
         self._btn.toggled.connect(self._on_toggled)
 
         # 콘텐츠 영역
         self._content_widget = QWidget()
         self._content_widget.setObjectName("CollapsibleContent")
         self._content_layout = QFormLayout(self._content_widget)
-        self._content_layout.setContentsMargins(14, 10, 14, 12)
+        self._content_layout.setContentsMargins(10, 6, 10, 8)
         self._content_layout.setLabelAlignment(Qt.AlignTop)
         self._content_layout.setFormAlignment(Qt.AlignTop)
         self._content_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        self._content_layout.setSpacing(8)
+        self._content_layout.setSpacing(5)
         self._content_widget.setVisible(False)
 
         outer.addWidget(self._btn)
@@ -251,7 +251,6 @@ class CollapsibleSection(QWidget):
     def setChecked(self, checked: bool):  # noqa: N802
         if self._btn.isChecked() != checked:
             self._btn.setChecked(checked)
-        # _on_toggled 가 알아서 _checked 갱신
 
     @property
     def form_layout(self) -> QFormLayout:
@@ -275,10 +274,8 @@ class CollapsibleSection(QWidget):
     def _on_toggled(self, checked: bool):
         self._checked = checked
         self._content_widget.setVisible(checked)
-        self._btn.setText(f"{'▼' if checked else '▶'}   {self._title}")
+        self._btn.setText(f"{'▼' if checked else '▶'}  {self._title}")
         self.toggled.emit(checked)
-
-
 
 
 class ArchAutoMapDockWidget(QDockWidget):
@@ -409,13 +406,24 @@ class ArchAutoMapDockWidget(QDockWidget):
         layout.setSpacing(8)
         layout.setColumnStretch(1, 1)
 
-        self.base_layer_combo = QgsMapLayerComboBox()
-        self.fill_layer_combo = QgsMapLayerComboBox()
-        self.fill_layer_combo.setFilters(QgsMapLayerProxyModel.PolygonLayer)
+        # ── 레이어 콤보박스 ────────────────────────────────────────
         self.outline_layer_combo = QgsMapLayerComboBox()
         self.outline_layer_combo.setFilters(QgsMapLayerProxyModel.PolygonLayer)
         self.outline_layer_combo.setAllowEmptyLayer(True)
         self.outline_layer_combo.setCurrentIndex(-1)
+        self.outline_layer_combo.setEnabled(False)   # 기본적으로 잠김
+
+        self._outline_locked = True
+        self.outline_lock_btn = QPushButton("🔒")
+        self.outline_lock_btn.setObjectName("NeutralButton")
+        self.outline_lock_btn.setFixedWidth(30)
+        self.outline_lock_btn.setFixedHeight(28)
+        self.outline_lock_btn.setToolTip("잠금 해제 — 외곽선 레이어를 변경할 수 있습니다")
+        self.outline_lock_btn.clicked.connect(self._toggle_outline_lock)
+
+        self.fill_layer_combo = QgsMapLayerComboBox()
+        self.fill_layer_combo.setFilters(QgsMapLayerProxyModel.PolygonLayer)
+        self.base_layer_combo = QgsMapLayerComboBox()
 
         self.name_field_combo = QComboBox()
         self.area_field_combo = QComboBox()
@@ -431,29 +439,49 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.refresh_layouts_button.setObjectName("NeutralButton")
         self.refresh_layouts_button.setFixedWidth(90)
 
-        def _lbl(text):
+        def _lbl(text, important=False):
             l = QLabel(text)
-            l.setStyleSheet(f"color: {DOCK_PALETTE.text_soft}; font-size: 11px;")
+            color = DOCK_PALETTE.title if important else DOCK_PALETTE.text_soft
+            l.setStyleSheet(f"color: {color}; font-size: 11px;{'font-weight:700;' if important else ''}")
             return l
 
+        # 외곽선 레이어 행: 콤보박스 + 잠금 버튼
+        outline_row = QHBoxLayout()
+        outline_row.setSpacing(4)
+        outline_row.addWidget(self.outline_layer_combo)
+        outline_row.addWidget(self.outline_lock_btn)
+        outline_container = QWidget()
+        outline_container.setLayout(outline_row)
+
+        # 레이어 순서: 외곽선 → 채움 → 배경 (시각 스택 순서)
         rows = [
-            ("배경 레이어", self.base_layer_combo),
-            ("유적 채움", self.fill_layer_combo),
-            ("유적 외곽선", self.outline_layer_combo),
-            ("유적명 필드", self.name_field_combo),
-            ("면적 필드", self.area_field_combo),
-            ("출력 CRS", self.output_crs_edit),
-            ("Layout 모드", self.layout_mode_combo),
-            ("Layout 이름", self.layout_name_combo),
-            ("Map Item ID", self.map_item_id_combo),
+            ("유적 외곽선", outline_container, True),
+            ("유적 채움", self.fill_layer_combo, False),
+            ("배경 레이어", self.base_layer_combo, False),
+            ("유적명 필드", self.name_field_combo, False),
+            ("면적 필드", self.area_field_combo, False),
+            ("출력 CRS", self.output_crs_edit, False),
+            ("Layout 모드", self.layout_mode_combo, False),
+            ("Layout 이름", self.layout_name_combo, False),
+            ("Map Item ID", self.map_item_id_combo, False),
         ]
-        for row_idx, (label_text, widget) in enumerate(rows):
-            layout.addWidget(_lbl(label_text), row_idx, 0, Qt.AlignRight | Qt.AlignVCenter)
+        for row_idx, (label_text, widget, important) in enumerate(rows):
+            layout.addWidget(_lbl(label_text, important), row_idx, 0, Qt.AlignRight | Qt.AlignVCenter)
             layout.addWidget(widget, row_idx, 1)
 
         layout.addWidget(self.refresh_layouts_button, 8, 2)
 
         return group
+
+    def _toggle_outline_lock(self):
+        self._outline_locked = not self._outline_locked
+        self.outline_layer_combo.setEnabled(not self._outline_locked)
+        self.outline_lock_btn.setText("🔒" if self._outline_locked else "🔓")
+        self.outline_lock_btn.setToolTip(
+            "잠금 해제 — 외곽선 레이어를 변경할 수 있습니다"
+            if self._outline_locked else
+            "잠금 활성 — 클릭 시 다시 잠깔 수 있습니다"
+        )
 
     def _build_style_group(self):
         self.style_group = CollapsibleSection("표현 설정 (선택)")

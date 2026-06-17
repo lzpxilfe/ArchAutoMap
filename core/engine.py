@@ -173,7 +173,7 @@ class ArchAutoMapEngine:
         request = (
             QgsFeatureRequest()
             .setFilterExpression(self._contains_expression(name_field, lowered_search))
-            .setSubsetOfAttributes([layer.fields().indexOf(name_field)], layer.fields())
+            .setSubsetOfAttributes([name_field], layer.fields())
             .setLimit(max_results)
         )
 
@@ -422,7 +422,8 @@ class ArchAutoMapEngine:
         prepared.layout.refresh()
 
     def _render_with_overlay(self, prepared: _PreparedRender):
-        prepared.map_item.setLayers([prepared.base_layer] + prepared.overlay_layers)
+        layers = list(reversed(prepared.overlay_layers)) + [prepared.base_layer]
+        prepared.map_item.setLayers(layers)
         prepared.map_item.refresh()
         prepared.layout.refresh()
 
@@ -455,7 +456,7 @@ class ArchAutoMapEngine:
             )
         else:
             request.setSubsetOfAttributes(
-                [outline_layer.fields().indexOf(config.name_field)],
+                [config.name_field],
                 outline_layer.fields(),
             )
         if max_matches:
@@ -677,7 +678,8 @@ class ArchAutoMapEngine:
         if hasattr(map_item, "setKeepLayerSet"):
             map_item.setKeepLayerSet(True)
 
-        map_item.setLayers([base_layer] + overlay_layers)
+        layers = list(reversed(overlay_layers)) + [base_layer]
+        map_item.setLayers(layers)
         map_item.setCrs(output_crs)
         map_item.setExtent(extent)
         map_item.setScale(scale)

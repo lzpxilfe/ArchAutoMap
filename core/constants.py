@@ -393,11 +393,11 @@ def build_dock_stylesheet(palette: DockPalette = DOCK_PALETTE) -> str:
                 background: {palette.surface};
                 color: {palette.title};
                 border: 1px solid {palette.border};
-                border-radius: 10px;
-                padding: 8px 14px;
+                border-radius: 6px;
+                padding: 3px 10px;
                 text-align: left;
                 font-weight: 700;
-                font-size: 12px;
+                font-size: 11px;
             }}
             QPushButton#CollapsibleHeader:checked {{
                 background: {palette.surface_alt};
@@ -413,8 +413,8 @@ def build_dock_stylesheet(palette: DockPalette = DOCK_PALETTE) -> str:
                 background: {palette.surface};
                 border: 1px solid {palette.border_focus};
                 border-top: none;
-                border-bottom-left-radius: 10px;
-                border-bottom-right-radius: 10px;
+                border-bottom-left-radius: 6px;
+                border-bottom-right-radius: 6px;
             }}
             """
 
