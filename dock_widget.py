@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from qgis.PyQt.QtCore import QTimer, Qt, pyqtSignal
+from qgis.PyQt.QtCore import QRectF
 from qgis.PyQt.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient, QBrush
 from qgis.PyQt.QtWidgets import (
     QApplication,
@@ -107,8 +108,9 @@ class OccupancyDiagramWidget(QWidget):
         # 배경 사각형
         painter.setPen(QPen(self._frame, OCCUPANCY_DIAGRAM_STYLE.frame_width_px))
         painter.setBrush(self._bg)
+        rect = QRectF(square_x, square_y, size, size)
         painter.drawRoundedRect(
-            square_x, square_y, size, size,
+            rect,
             OCCUPANCY_DIAGRAM_STYLE.corner_radius_px,
             OCCUPANCY_DIAGRAM_STYLE.corner_radius_px,
         )
@@ -117,6 +119,7 @@ class OccupancyDiagramWidget(QWidget):
         diameter = size * self._ratio
         circle_x = square_x + (size - diameter) / 2
         circle_y = square_y + (size - diameter) / 2
+        circle_rect = QRectF(circle_x, circle_y, diameter, diameter)
 
         # 그라데이션 브러시
         gradient = QLinearGradient(circle_x, circle_y, circle_x + diameter, circle_y + diameter)
@@ -124,7 +127,7 @@ class OccupancyDiagramWidget(QWidget):
         gradient.setColorAt(1, self._accent)
         painter.setPen(QPen(self._accent.darker(140), OCCUPANCY_DIAGRAM_STYLE.accent_outline_width_px))
         painter.setBrush(QBrush(gradient))
-        painter.drawEllipse(circle_x, circle_y, diameter, diameter)
+        painter.drawEllipse(circle_rect)
 
 
 class AttributeRuleRow(QFrame):
