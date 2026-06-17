@@ -11,8 +11,8 @@ DOCK_WIDGET_OBJECT_NAME = "ArchAutoMapDockWidget"
 SETTINGS_PREFIX = f"{PLUGIN_NAME}/"
 
 DEFAULT_OUTPUT_CRS_AUTHID = "EPSG:5186"
-DEFAULT_FILL_COLOR_HEX = "#C66B3D"
-DEFAULT_OUTLINE_COLOR_HEX = "#3F332A"
+DEFAULT_FILL_COLOR_HEX = "#6C8EBF"
+DEFAULT_OUTLINE_COLOR_HEX = "#2D3A4A"
 DEFAULT_OUTLINE_WIDTH_MM = 0.6
 DEFAULT_DPI = 300
 DEFAULT_PREVIEW_DPI = 120
@@ -53,8 +53,8 @@ MULTI_POLYGON_GEOMETRY_NAME = "MultiPolygon"
 TRANSPARENT_FILL_COLOR = "0,0,0,0"
 SYMBOL_SIZE_UNIT_MM = "MM"
 
-COLOR_BUTTON_TEXT_LIGHT = "#1f1f1f"
-COLOR_BUTTON_TEXT_DARK = "#ffffff"
+COLOR_BUTTON_TEXT_LIGHT = "#F0F4FF"
+COLOR_BUTTON_TEXT_DARK = "#0D1117"
 COLOR_BUTTON_LIGHTNESS_THRESHOLD = 140
 
 
@@ -65,8 +65,8 @@ class DockDimensions:
     initial_height: int = 860
     preview_min_width: int = 310
     preview_min_height: int = 230
-    log_min_height: int = 150
-    occupancy_widget_min_size: int = 140
+    log_min_height: int = 120
+    occupancy_widget_min_size: int = 130
 
 
 @dataclass(frozen=True)
@@ -74,35 +74,58 @@ class OccupancyDiagramStyle:
     min_ratio: float = 0.05
     max_ratio: float = 0.98
     margin_px: int = 10
-    frame_width_px: float = 2.0
-    corner_radius_px: float = 12.0
-    accent_outline_width_px: float = 1.5
+    frame_width_px: float = 1.5
+    corner_radius_px: float = 10.0
+    accent_outline_width_px: float = 1.0
 
 
 @dataclass(frozen=True)
 class DockPalette:
-    background: str = "#F5EFE6"
-    surface: str = "#D9CBB4"
-    surface_alt: str = "#FBF7F0"
-    surface_muted: str = "#E9DFD1"
-    text: str = "#30261E"
-    text_soft: str = "#5B4D40"
-    text_muted: str = "#6B5B4D"
-    text_disabled: str = "#6E6156"
-    title: str = "#7A4A31"
-    checkbox: str = "#4A3F35"
-    border: str = "#C4B39A"
-    border_soft: str = "#BCA992"
-    checkbox_border: str = "#A99079"
-    accent: str = "#C66B3D"
-    accent_hover: str = "#B45D32"
-    neutral: str = "#8C7967"
-    neutral_hover: str = "#7B6857"
-    button_default: str = "#A48F7A"
-    button_default_hover: str = "#927B66"
-    button_disabled: str = "#CCBDAA"
-    color_button_border: str = "#9D8A76"
-    diagram_frame: str = "#BDAE98"
+    # ── 배경/표면 ──────────────────────────────
+    background: str = "#0D1117"        # GitHub dark 배경
+    surface: str = "#161B22"           # 카드 배경
+    surface_alt: str = "#1C2333"       # 입력창, 인포카드
+    surface_muted: str = "#21262D"     # 호버 표면
+    surface_hover: str = "#2D333B"     # 호버
+
+    # ── 텍스트 ────────────────────────────────
+    text: str = "#E6EDF3"              # 기본 텍스트
+    text_soft: str = "#8B949E"         # 보조 텍스트
+    text_muted: str = "#6E7681"        # 설명 텍스트
+    text_disabled: str = "#484F58"     # 비활성
+
+    # ── 타이틀 / 강조 색 ─────────────────────
+    title: str = "#79C0FF"             # 파란 accent 텍스트
+    checkbox: str = "#CDD9E5"
+
+    # ── 테두리 ───────────────────────────────
+    border: str = "#30363D"
+    border_soft: str = "#21262D"
+    border_focus: str = "#388BFD"
+    checkbox_border: str = "#30363D"
+
+    # ── 버튼 accent (파란 계열) ───────────────
+    accent: str = "#388BFD"            # primary blue
+    accent_hover: str = "#58A6FF"
+
+    # ── neutral 버튼 ──────────────────────────
+    neutral: str = "#2D333B"
+    neutral_hover: str = "#3D444D"
+    neutral_text: str = "#CDD9E5"
+
+    # ── default 버튼 ─────────────────────────
+    button_default: str = "#21262D"
+    button_default_hover: str = "#2D333B"
+    button_disabled: str = "#161B22"
+
+    # ── 기타 ────────────────────────────────
+    color_button_border: str = "#30363D"
+    diagram_frame: str = "#30363D"
+    diagram_bg: str = "#161B22"
+
+    # ── 위험/강조 버튼 ────────────────────────
+    accent2: str = "#2EA043"           # 일괄출력 green
+    accent2_hover: str = "#3FB950"
 
 
 DOCK_DIMENSIONS = DockDimensions()
@@ -120,14 +143,17 @@ def build_color_button_stylesheet(
         f"background-color: {background_hex};"
         f"color: {foreground_hex};"
         f"border: 1px solid {border_hex};"
-        "border-radius: 10px;"
-        "padding: 8px 12px;"
-        "font-weight: 700;}"
+        "border-radius: 8px;"
+        "padding: 6px 10px;"
+        "font-weight: 600;}"
     )
 
 
 def build_dock_stylesheet(palette: DockPalette = DOCK_PALETTE) -> str:
     return f"""
+            * {{
+                font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
+            }}
             QWidget#{DOCK_WIDGET_OBJECT_NAME} {{
                 background: {palette.background};
                 color: {palette.text};
@@ -136,104 +162,184 @@ def build_dock_stylesheet(palette: DockPalette = DOCK_PALETTE) -> str:
                 background: {palette.background};
                 color: {palette.text};
             }}
+            QDialog {{
+                background: {palette.background};
+                color: {palette.text};
+            }}
             QScrollArea {{
                 border: none;
                 background: {palette.background};
             }}
-            QFrame#HeroCard, QGroupBox {{
-                background: {palette.surface};
-                border: 1px solid {palette.border};
-                border-radius: 16px;
-            }}
-            QFrame#RuleRow {{
-                background: {palette.surface_alt};
+            QFrame#HeroCard {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #1A2332,
+                    stop:1 #162032
+                );
                 border: 1px solid {palette.border};
                 border-radius: 14px;
             }}
             QGroupBox {{
-                margin-top: 16px;
+                background: {palette.surface};
+                border: 1px solid {palette.border};
+                border-radius: 12px;
+                margin-top: 18px;
                 padding: 14px 12px 12px 12px;
-                font-weight: 700;
+                font-weight: 600;
+                font-size: 12px;
+                color: {palette.text};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
-                left: 12px;
+                left: 14px;
                 padding: 0 6px;
                 color: {palette.title};
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+            }}
+            QFrame#RuleRow {{
+                background: {palette.surface_alt};
+                border: 1px solid {palette.border};
+                border-radius: 10px;
             }}
             QLabel#HeroTitle {{
-                color: {palette.title};
-                font-size: 20px;
+                color: {palette.text};
+                font-size: 18px;
                 font-weight: 800;
+                letter-spacing: -0.3px;
             }}
             QLabel#HeroSubtitle, QLabel#HelpText {{
                 color: {palette.text_soft};
+                font-size: 11px;
+                line-height: 1.5;
+            }}
+            QLabel#SectionCaption {{
+                color: {palette.title};
+                font-weight: 700;
+                font-size: 11px;
+                letter-spacing: 0.3px;
+            }}
+            QLabel#InfoCard {{
+                background: {palette.surface_alt};
+                border: 1px solid {palette.border};
+                border-radius: 10px;
+                padding: 10px 12px;
+                color: {palette.text_soft};
+                font-size: 11px;
+                line-height: 1.6;
+            }}
+            QLabel#StatusPill {{
+                background: {palette.surface_alt};
+                border: 1px solid {palette.border};
+                border-radius: 8px;
+                padding: 6px 12px;
+                color: {palette.title};
+                font-weight: 600;
+                font-size: 11px;
+            }}
+            QLabel#PreviewFrame {{
+                background: {palette.surface_alt};
+                border: 1px solid {palette.border};
+                border-radius: 10px;
+                padding: 10px;
+                color: {palette.text_muted};
+            }}
+            QLabel {{
+                color: {palette.text};
                 font-size: 12px;
             }}
             QCheckBox {{
                 color: {palette.checkbox};
                 spacing: 8px;
-                font-weight: 700;
+                font-weight: 600;
+                font-size: 12px;
             }}
             QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border-radius: 5px;
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
                 border: 1px solid {palette.checkbox_border};
                 background: {palette.surface_alt};
             }}
             QCheckBox::indicator:checked {{
                 background: {palette.accent};
                 border-color: {palette.accent_hover};
+                image: none;
             }}
-            QLabel#SectionCaption {{
-                color: {palette.title};
-                font-weight: 700;
-            }}
-            QLabel#InfoCard, QLabel#StatusPill, QLabel#PreviewFrame {{
-                background: {palette.surface_alt};
-                border: 1px solid {palette.border};
-                border-radius: 14px;
-                padding: 10px 12px;
-            }}
-            QLabel#StatusPill {{
-                color: {palette.title};
-                font-weight: 700;
-            }}
-            QLabel#PreviewFrame {{
-                color: {palette.text_muted};
+            QCheckBox::indicator:hover {{
+                border-color: {palette.accent};
             }}
             QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{
                 background: {palette.surface_alt};
-                border: 1px solid {palette.border_soft};
-                border-radius: 10px;
-                padding: 6px 8px;
+                color: {palette.text};
+                border: 1px solid {palette.border};
+                border-radius: 8px;
+                padding: 6px 10px;
                 selection-background-color: {palette.accent};
+                font-size: 12px;
             }}
             QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
             QDoubleSpinBox:focus, QPlainTextEdit:focus {{
-                border: 1px solid {palette.accent};
+                border: 1px solid {palette.border_focus};
+                background: {palette.surface_hover};
+            }}
+            QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {{
+                border: 1px solid {palette.neutral_hover};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid {palette.text_soft};
+                margin-right: 6px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {palette.surface};
+                color: {palette.text};
+                border: 1px solid {palette.border};
+                border-radius: 8px;
+                selection-background-color: {palette.accent};
+                outline: none;
             }}
             QPushButton {{
                 background: {palette.button_default};
-                color: white;
-                border: none;
-                border-radius: 10px;
-                padding: 8px 12px;
-                font-weight: 700;
+                color: {palette.neutral_text};
+                border: 1px solid {palette.border};
+                border-radius: 8px;
+                padding: 7px 14px;
+                font-weight: 600;
+                font-size: 12px;
             }}
             QPushButton:hover {{
                 background: {palette.button_default_hover};
+                border-color: {palette.neutral_hover};
             }}
-            QPushButton#PrimaryButton, QPushButton#AccentButton {{
+            QPushButton#PrimaryButton {{
                 background: {palette.accent};
+                color: white;
+                border: none;
             }}
-            QPushButton#PrimaryButton:hover,
-            QPushButton#AccentButton:hover {{
+            QPushButton#PrimaryButton:hover {{
                 background: {palette.accent_hover};
+            }}
+            QPushButton#AccentButton {{
+                background: {palette.accent2};
+                color: white;
+                border: none;
+            }}
+            QPushButton#AccentButton:hover {{
+                background: {palette.accent2_hover};
             }}
             QPushButton#NeutralButton {{
                 background: {palette.neutral};
+                color: {palette.neutral_text};
+                border: 1px solid {palette.border};
             }}
             QPushButton#NeutralButton:hover {{
                 background: {palette.neutral_hover};
@@ -241,19 +347,46 @@ def build_dock_stylesheet(palette: DockPalette = DOCK_PALETTE) -> str:
             QPushButton:disabled {{
                 background: {palette.button_disabled};
                 color: {palette.text_disabled};
+                border-color: {palette.border};
+            }}
+            QGroupBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 1px solid {palette.checkbox_border};
+                background: {palette.surface_alt};
+            }}
+            QGroupBox::indicator:checked {{
+                background: {palette.accent};
+                border-color: {palette.accent_hover};
             }}
             QScrollBar:vertical {{
-                background: {palette.surface_muted};
-                width: 12px;
-                border-radius: 6px;
+                background: {palette.background};
+                width: 8px;
+                border-radius: 4px;
                 margin: 2px;
             }}
             QScrollBar::handle:vertical {{
-                background: {palette.accent};
-                border-radius: 6px;
+                background: {palette.border};
+                border-radius: 4px;
                 min-height: 24px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {palette.text_muted};
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
+            }}
+            QScrollBar:horizontal {{
+                background: {palette.background};
+                height: 8px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {palette.border};
+                border-radius: 4px;
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px;
             }}
             """

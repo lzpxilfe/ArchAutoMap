@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 
 from qgis.PyQt.QtCore import QTimer, Qt, pyqtSignal
-from qgis.PyQt.QtGui import QColor, QPainter, QPen, QPixmap
+from qgis.PyQt.QtGui import QColor, QPainter, QPen, QPixmap, QFont, QLinearGradient, QBrush
 from qgis.PyQt.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QColorDialog,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QFormLayout,
@@ -22,6 +23,7 @@ from qgis.PyQt.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QDoubleSpinBox,
     QVBoxLayout,
@@ -77,7 +79,7 @@ class OccupancyDiagramWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._ratio = OCCUPANCY_DIAGRAM_STYLE.min_ratio
-        self._background = QColor(DOCK_PALETTE.surface_alt)
+        self._bg = QColor(DOCK_PALETTE.diagram_bg)
         self._frame = QColor(DOCK_PALETTE.diagram_frame)
         self._accent = QColor(DOCK_PALETTE.accent)
         self.setMinimumSize(
@@ -102,33 +104,26 @@ class OccupancyDiagramWidget(QWidget):
         square_x = (self.width() - size) / 2
         square_y = (self.height() - size) / 2
 
-        painter.setPen(
-            QPen(
-                self._frame,
-                OCCUPANCY_DIAGRAM_STYLE.frame_width_px,
-            )
-        )
-        painter.setBrush(self._background)
+        # 배경 사각형
+        painter.setPen(QPen(self._frame, OCCUPANCY_DIAGRAM_STYLE.frame_width_px))
+        painter.setBrush(self._bg)
         painter.drawRoundedRect(
-            square_x,
-            square_y,
-            size,
-            size,
+            square_x, square_y, size, size,
             OCCUPANCY_DIAGRAM_STYLE.corner_radius_px,
             OCCUPANCY_DIAGRAM_STYLE.corner_radius_px,
         )
 
+        # 원
         diameter = size * self._ratio
         circle_x = square_x + (size - diameter) / 2
         circle_y = square_y + (size - diameter) / 2
 
-        painter.setPen(
-            QPen(
-                self._accent.darker(120),
-                OCCUPANCY_DIAGRAM_STYLE.accent_outline_width_px,
-            )
-        )
-        painter.setBrush(self._accent)
+        # 그라데이션 브러시
+        gradient = QLinearGradient(circle_x, circle_y, circle_x + diameter, circle_y + diameter)
+        gradient.setColorAt(0, self._accent.lighter(130))
+        gradient.setColorAt(1, self._accent)
+        painter.setPen(QPen(self._accent.darker(140), OCCUPANCY_DIAGRAM_STYLE.accent_outline_width_px))
+        painter.setBrush(QBrush(gradient))
         painter.drawEllipse(circle_x, circle_y, diameter, diameter)
 
 
@@ -136,18 +131,13 @@ class AttributeRuleRow(QFrame):
     changed = pyqtSignal()
     removed = pyqtSignal(object)
 
-    def __init__(
-        self,
-        value: str = "",
-        fill_color_hex: str = DEFAULT_FILL_COLOR_HEX,
-        parent=None,
-    ):
+    def __init__(self, value: str = "", fill_color_hex: str = DEFAULT_FILL_COLOR_HEX, parent=None):
         super().__init__(parent)
         self._fill_color = QColor(fill_color_hex)
         self.setObjectName("RuleRow")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(8)
 
         self.value_edit = QLineEdit(value)
@@ -155,8 +145,9 @@ class AttributeRuleRow(QFrame):
 
         self.color_button = QPushButton()
         self.color_button.setObjectName("ColorButton")
-        self.remove_button = QPushButton("삭제")
+        self.remove_button = QPushButton("✕")
         self.remove_button.setObjectName("NeutralButton")
+        self.remove_button.setFixedWidth(32)
 
         layout.addWidget(self.value_edit, stretch=1)
         layout.addWidget(self.color_button)
@@ -196,14 +187,21 @@ class AttributeRuleRow(QFrame):
         )
         self.color_button.setStyleSheet(
             build_color_button_stylesheet(
-                self._fill_color.name(),
-                foreground,
-                DOCK_PALETTE.color_button_border,
+                self._fill_color.name(), foreground, DOCK_PALETTE.color_button_border,
             )
         )
 
 
+class _SectionLabel(QLabel):
+    """그룹 내 소제목 레이블"""
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setObjectName("SectionCaption")
+
+
 class ArchAutoMapDockWidget(QDockWidget):
+    """QGIS DockWidget 래퍼 — 내부적으로 독립 다이얼로그를 포함합니다."""
+
     closed = pyqtSignal()
 
     def __init__(self, iface, parent=None):
@@ -224,10 +222,18 @@ class ArchAutoMapDockWidget(QDockWidget):
         self._search_timer.timeout.connect(self._refresh_feature_choices)
 
         self.setObjectName(DOCK_WIDGET_OBJECT_NAME)
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        self.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable)
+
+        # ── 독립 부동 창 설정 ─────────────────────────────────────
+        # DockWidgetFloatable 허용 + 기본 상태를 float로 설정
+        self.setAllowedAreas(Qt.NoDockWidgetArea)
+        self.setFeatures(
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        self.setFloating(True)  # 처음부터 독립 창으로 띄우기
+
         self.setMinimumWidth(DOCK_DIMENSIONS.width)
-        self.setMaximumWidth(DOCK_DIMENSIONS.width)
         self.setMinimumHeight(DOCK_DIMENSIONS.min_height)
         self._build_ui()
         self._apply_theme()
@@ -251,16 +257,21 @@ class ArchAutoMapDockWidget(QDockWidget):
         super().resizeEvent(event)
         self._update_preview_pixmap()
 
+    # ──────────────────────────────────────────────────────────────
+    #  UI 구성
+    # ──────────────────────────────────────────────────────────────
+
     def _build_ui(self):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         container = QWidget(scroll)
         container.setObjectName("ArchAutoMapRoot")
         root = QVBoxLayout(container)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
 
         root.addWidget(self._build_header_card())
         root.addWidget(self._build_input_group())
@@ -277,24 +288,44 @@ class ArchAutoMapDockWidget(QDockWidget):
         card = QFrame()
         card.setObjectName("HeroCard")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(6)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(4)
 
+        # 로고 + 타이틀 한 줄
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+
+        badge = QLabel("🗺")
+        badge.setStyleSheet("font-size: 22px;")
         title = QLabel(PLUGIN_NAME)
         title.setObjectName("HeroTitle")
-        subtitle = QLabel(
-            "유적 1건만 골라 미리보고, 원래 심볼을 유지한 채 빠르게 도면으로 출력합니다."
+
+        ver = QLabel("v0.1.2")
+        ver.setStyleSheet(
+            f"color: {DOCK_PALETTE.text_soft}; font-size: 10px; "
+            f"background: {DOCK_PALETTE.surface}; border-radius: 4px; "
+            f"padding: 2px 6px;"
         )
+        ver.setAlignment(Qt.AlignVCenter)
+
+        title_row.addWidget(badge)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        title_row.addWidget(ver)
+
+        subtitle = QLabel("유적 1건만 골라 원본 심볼 그대로 JPG 도면으로 빠르게 출력합니다.")
         subtitle.setObjectName("HeroSubtitle")
         subtitle.setWordWrap(True)
 
-        layout.addWidget(title)
+        layout.addLayout(title_row)
         layout.addWidget(subtitle)
         return card
 
     def _build_input_group(self):
         group = QGroupBox("입력 설정")
         layout = QGridLayout(group)
+        layout.setSpacing(8)
+        layout.setColumnStretch(1, 1)
 
         self.base_layer_combo = QgsMapLayerComboBox()
         self.fill_layer_combo = QgsMapLayerComboBox()
@@ -314,28 +345,31 @@ class ArchAutoMapDockWidget(QDockWidget):
 
         self.layout_name_combo = QComboBox()
         self.map_item_id_combo = QComboBox()
-        self.refresh_layouts_button = QPushButton("Layout 새로고침")
+        self.refresh_layouts_button = QPushButton("↻ 새로고침")
         self.refresh_layouts_button.setObjectName("NeutralButton")
+        self.refresh_layouts_button.setFixedWidth(90)
 
-        layout.addWidget(QLabel("배경 레이어"), 0, 0)
-        layout.addWidget(self.base_layer_combo, 0, 1)
-        layout.addWidget(QLabel("유적 채움 레이어"), 1, 0)
-        layout.addWidget(self.fill_layer_combo, 1, 1)
-        layout.addWidget(QLabel("유적 외곽선 레이어"), 2, 0)
-        layout.addWidget(self.outline_layer_combo, 2, 1)
-        layout.addWidget(QLabel("유적명 필드"), 3, 0)
-        layout.addWidget(self.name_field_combo, 3, 1)
-        layout.addWidget(QLabel("면적 필드"), 4, 0)
-        layout.addWidget(self.area_field_combo, 4, 1)
-        layout.addWidget(QLabel("출력 CRS"), 5, 0)
-        layout.addWidget(self.output_crs_edit, 5, 1)
-        layout.addWidget(QLabel("Layout 모드"), 6, 0)
-        layout.addWidget(self.layout_mode_combo, 6, 1)
-        layout.addWidget(QLabel("Layout 이름"), 7, 0)
-        layout.addWidget(self.layout_name_combo, 7, 1)
-        layout.addWidget(QLabel("Map Item ID"), 8, 0)
-        layout.addWidget(self.map_item_id_combo, 8, 1)
-        layout.addWidget(self.refresh_layouts_button, 9, 1)
+        def _lbl(text):
+            l = QLabel(text)
+            l.setStyleSheet(f"color: {DOCK_PALETTE.text_soft}; font-size: 11px;")
+            return l
+
+        rows = [
+            ("배경 레이어", self.base_layer_combo),
+            ("유적 채움", self.fill_layer_combo),
+            ("유적 외곽선", self.outline_layer_combo),
+            ("유적명 필드", self.name_field_combo),
+            ("면적 필드", self.area_field_combo),
+            ("출력 CRS", self.output_crs_edit),
+            ("Layout 모드", self.layout_mode_combo),
+            ("Layout 이름", self.layout_name_combo),
+            ("Map Item ID", self.map_item_id_combo),
+        ]
+        for row_idx, (label_text, widget) in enumerate(rows):
+            layout.addWidget(_lbl(label_text), row_idx, 0, Qt.AlignRight | Qt.AlignVCenter)
+            layout.addWidget(widget, row_idx, 1)
+
+        layout.addWidget(self.refresh_layouts_button, 8, 2)
 
         return group
 
@@ -347,16 +381,21 @@ class ArchAutoMapDockWidget(QDockWidget):
         layout.setLabelAlignment(Qt.AlignTop)
         layout.setFormAlignment(Qt.AlignTop)
         layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        layout.setSpacing(8)
+
+        note = QLabel(
+            "기본값은 원래 레이어 심볼을 사용합니다. "
+            "체크 시 이번 출력에 한해 채움색/외곽선을 덮어씁니다."
+        )
+        note.setObjectName("HelpText")
+        note.setWordWrap(True)
 
         self.fill_color_button = QPushButton()
         self.fill_color_button.setObjectName("ColorButton")
         self.outline_color_button = QPushButton()
         self.outline_color_button.setObjectName("ColorButton")
         self.outline_width_spin = QDoubleSpinBox()
-        self.outline_width_spin.setRange(
-            MIN_OUTLINE_WIDTH_MM,
-            MAX_OUTLINE_WIDTH_MM,
-        )
+        self.outline_width_spin.setRange(MIN_OUTLINE_WIDTH_MM, MAX_OUTLINE_WIDTH_MM)
         self.outline_width_spin.setSingleStep(OUTLINE_WIDTH_STEP_MM)
         self.outline_width_spin.setValue(DEFAULT_OUTLINE_WIDTH_MM)
         self.outline_width_spin.setSuffix(OUTLINE_WIDTH_SUFFIX)
@@ -364,44 +403,33 @@ class ArchAutoMapDockWidget(QDockWidget):
         self._apply_button_color(self.fill_color_button, self._fill_color)
         self._apply_button_color(self.outline_color_button, self._outline_color)
 
-        note = QLabel(
-            "기본값은 원래 레이어 심볼을 그대로 사용합니다. 필요할 때만 체크해서 "
-            "이번 미리보기와 출력에 한해 채움색과 외곽선을 덮어씁니다."
-        )
-        note.setObjectName("HelpText")
-        note.setWordWrap(True)
-
         self.attribute_style_checkbox = QCheckBox("속성값별 채움색 사용")
         self.attribute_style_field_combo = QComboBox()
-        self.attribute_style_field_combo.addItem(
-            ATTRIBUTE_STYLE_NONE_LABEL,
-            "",
-        )
-
-        rules_box = QWidget()
-        rules_box_layout = QVBoxLayout(rules_box)
-        rules_box_layout.setContentsMargins(0, 0, 0, 0)
-        rules_box_layout.setSpacing(8)
+        self.attribute_style_field_combo.addItem(ATTRIBUTE_STYLE_NONE_LABEL, "")
 
         self.style_rules_container = QWidget()
         self.style_rules_layout = QVBoxLayout(self.style_rules_container)
         self.style_rules_layout.setContentsMargins(0, 0, 0, 0)
-        self.style_rules_layout.setSpacing(8)
+        self.style_rules_layout.setSpacing(6)
 
-        self.add_style_rule_button = QPushButton("+ 색상 규칙 추가")
+        self.add_style_rule_button = QPushButton("＋  색상 규칙 추가")
         self.add_style_rule_button.setObjectName("NeutralButton")
 
         rules_help = QLabel(
-            "분류 심볼을 잠시 덮어쓰고 싶을 때만 사용하세요. 일치하지 않는 속성값은 기본 채움색을 씁니다."
+            "일치하지 않는 속성값은 기본 채움색을 사용합니다."
         )
         rules_help.setObjectName("HelpText")
         rules_help.setWordWrap(True)
 
-        rules_box_layout.addWidget(self.attribute_style_checkbox)
-        rules_box_layout.addWidget(self.attribute_style_field_combo)
-        rules_box_layout.addWidget(self.style_rules_container)
-        rules_box_layout.addWidget(self.add_style_rule_button, alignment=Qt.AlignLeft)
-        rules_box_layout.addWidget(rules_help)
+        rules_box = QWidget()
+        rb_layout = QVBoxLayout(rules_box)
+        rb_layout.setContentsMargins(0, 0, 0, 0)
+        rb_layout.setSpacing(6)
+        rb_layout.addWidget(self.attribute_style_checkbox)
+        rb_layout.addWidget(self.attribute_style_field_combo)
+        rb_layout.addWidget(self.style_rules_container)
+        rb_layout.addWidget(self.add_style_rule_button, alignment=Qt.AlignLeft)
+        rb_layout.addWidget(rules_help)
 
         layout.addRow(note)
         layout.addRow("기본 채움색", self.fill_color_button)
@@ -413,81 +441,105 @@ class ArchAutoMapDockWidget(QDockWidget):
     def _build_preview_group(self):
         group = QGroupBox("미리보기")
         layout = QVBoxLayout(group)
+        layout.setSpacing(10)
 
-        top_row = QHBoxLayout()
+        # 검색 + 선택 행
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
         self.feature_search_edit = QLineEdit()
-        self.feature_search_edit.setPlaceholderText("유적명 검색")
+        self.feature_search_edit.setPlaceholderText("🔍  유적명 검색 (2글자 이상)")
         self.feature_combo = QComboBox()
-        self.preview_button = QPushButton("현재 유적 미리보기")
-        self.preview_button.setObjectName("PrimaryButton")
-        top_row.addWidget(self.feature_search_edit)
-        top_row.addWidget(self.feature_combo, stretch=1)
-        top_row.addWidget(self.preview_button)
+        self.feature_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        search_row.addWidget(self.feature_search_edit, 2)
+        search_row.addWidget(self.feature_combo, 3)
 
+        self.preview_button = QPushButton("▶  미리보기")
+        self.preview_button.setObjectName("PrimaryButton")
+        self.preview_button.setMinimumHeight(34)
+        search_row.addWidget(self.preview_button)
+
+        # 미리보기 이미지 + 사이드 패널
         preview_row = QHBoxLayout()
+        preview_row.setSpacing(10)
+
         self.preview_image_label = QLabel("미리보기 이미지")
         self.preview_image_label.setObjectName("PreviewFrame")
         self.preview_image_label.setAlignment(Qt.AlignCenter)
         self.preview_image_label.setMinimumSize(
-            DOCK_DIMENSIONS.preview_min_width,
-            DOCK_DIMENSIONS.preview_min_height,
+            DOCK_DIMENSIONS.preview_min_width, DOCK_DIMENSIONS.preview_min_height,
         )
         self.preview_image_label.setWordWrap(True)
 
         side_panel = QVBoxLayout()
-        self.occupancy_title = QLabel("도면 점유율 도식")
-        self.occupancy_title.setObjectName("SectionCaption")
-        side_panel.addWidget(self.occupancy_title)
+        side_panel.setSpacing(8)
+        occ_title = _SectionLabel("도면 점유율")
+        side_panel.addWidget(occ_title)
         self.occupancy_widget = OccupancyDiagramWidget()
         side_panel.addWidget(self.occupancy_widget)
 
-        self.metrics_label = QLabel(
-            "가로 점유율: -\n세로 점유율: -\n판정: -\n축척: -\n면적: -"
-        )
+        self.metrics_label = QLabel("가로 점유율: -\n세로 점유율: -\n판정: -\n축척: -\n면적: -")
         self.metrics_label.setObjectName("InfoCard")
         self.metrics_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         side_panel.addWidget(self.metrics_label)
         side_panel.addStretch(1)
 
-        preview_row.addWidget(self.preview_image_label, stretch=3)
-        preview_row.addLayout(side_panel, stretch=2)
+        preview_row.addWidget(self.preview_image_label, 3)
+        preview_row.addLayout(side_panel, 2)
 
-        layout.addLayout(top_row)
+        layout.addLayout(search_row)
         layout.addLayout(preview_row)
         return group
 
     def _build_export_group(self):
         group = QGroupBox("출력")
         layout = QGridLayout(group)
+        layout.setSpacing(8)
+        layout.setColumnStretch(1, 1)
 
         self.output_mode_combo = QComboBox()
         self.output_mode_combo.addItem("최종도면 1장", OUTPUT_MODE_FINAL_ONLY)
         self.output_mode_combo.addItem("배경도 + 유적도 2장", OUTPUT_MODE_PAIRED)
 
         self.output_dir_edit = QLineEdit()
-        self.output_dir_button = QPushButton("폴더 선택")
+        self.output_dir_edit.setPlaceholderText("출력 폴더 경로...")
+        self.output_dir_button = QPushButton("📁  폴더")
         self.output_dir_button.setObjectName("NeutralButton")
+        self.output_dir_button.setFixedWidth(80)
+
         self.dpi_spin = QSpinBox()
         self.dpi_spin.setRange(MIN_DPI, MAX_DPI)
         self.dpi_spin.setValue(DEFAULT_DPI)
+        self.dpi_spin.setSuffix(" dpi")
 
-        self.export_current_button = QPushButton("현재 유적 JPG 출력")
+        self.export_current_button = QPushButton("⬇  현재 유적 출력")
         self.export_current_button.setObjectName("PrimaryButton")
-        self.export_all_button = QPushButton("전체 유적 일괄 출력")
+        self.export_current_button.setMinimumHeight(34)
+        self.export_all_button = QPushButton("⬇  전체 일괄 출력")
         self.export_all_button.setObjectName("AccentButton")
+        self.export_all_button.setMinimumHeight(34)
         self.progress_label = QLabel("대기 중")
         self.progress_label.setObjectName("StatusPill")
+        self.progress_label.setAlignment(Qt.AlignCenter)
 
-        layout.addWidget(QLabel("출력 방식"), 0, 0)
+        def _lbl(text):
+            l = QLabel(text)
+            l.setStyleSheet(f"color: {DOCK_PALETTE.text_soft}; font-size: 11px;")
+            return l
+
+        layout.addWidget(_lbl("출력 방식"), 0, 0, Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.output_mode_combo, 0, 1, 1, 2)
-        layout.addWidget(QLabel("출력 폴더"), 1, 0)
+        layout.addWidget(_lbl("출력 폴더"), 1, 0, Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.output_dir_edit, 1, 1)
         layout.addWidget(self.output_dir_button, 1, 2)
-        layout.addWidget(QLabel("DPI"), 2, 0)
+        layout.addWidget(_lbl("DPI"), 2, 0, Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.dpi_spin, 2, 1, 1, 2)
-        layout.addWidget(self.export_current_button, 3, 1)
-        layout.addWidget(self.export_all_button, 3, 2)
-        layout.addWidget(self.progress_label, 4, 1, 1, 2)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addWidget(self.export_current_button, 1)
+        btn_row.addWidget(self.export_all_button, 1)
+        layout.addLayout(btn_row, 3, 0, 1, 3)
+        layout.addWidget(self.progress_label, 4, 0, 1, 3)
 
         return group
 
@@ -498,8 +550,16 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.log_edit.setReadOnly(True)
         self.log_edit.setMinimumHeight(DOCK_DIMENSIONS.log_min_height)
         self.log_edit.setPlaceholderText("미리보기와 출력 진행 상황이 여기에 표시됩니다.")
+        self.log_edit.setStyleSheet(
+            f"font-family: 'Consolas', 'D2Coding', monospace; font-size: 11px; "
+            f"color: {DOCK_PALETTE.text_soft};"
+        )
         layout.addWidget(self.log_edit)
         return group
+
+    # ──────────────────────────────────────────────────────────────
+    #  시그널 연결
+    # ──────────────────────────────────────────────────────────────
 
     def _connect_signals(self):
         self.fill_layer_combo.layerChanged.connect(self._on_fill_layer_changed)
@@ -530,6 +590,10 @@ class ArchAutoMapDockWidget(QDockWidget):
 
     def _apply_theme(self):
         self.setStyleSheet(build_dock_stylesheet(DOCK_PALETTE))
+
+    # ──────────────────────────────────────────────────────────────
+    #  슬롯
+    # ──────────────────────────────────────────────────────────────
 
     def _on_fill_layer_changed(self):
         self._refresh_fields()
@@ -614,12 +678,10 @@ class ArchAutoMapDockWidget(QDockWidget):
             index = self.name_field_combo.findText(saved_name_field)
             if index >= 0:
                 self.name_field_combo.setCurrentIndex(index)
-
         if saved_area_field:
             index = self.area_field_combo.findData(saved_area_field)
             if index >= 0:
                 self.area_field_combo.setCurrentIndex(index)
-
         if saved_style_field:
             index = self.attribute_style_field_combo.findData(saved_style_field)
             if index >= 0:
@@ -647,11 +709,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         current_feature_id = self.feature_combo.currentData()
         self.feature_combo.clear()
 
-        choices = self.engine.list_feature_choices(
-            fill_layer.id(),
-            name_field,
-            search_text,
-        )
+        choices = self.engine.list_feature_choices(fill_layer.id(), name_field, search_text)
         if not choices:
             self.feature_combo.addItem(FEATURE_NO_RESULTS_PLACEHOLDER, None)
             self.feature_combo.blockSignals(False)
@@ -688,11 +746,7 @@ class ArchAutoMapDockWidget(QDockWidget):
 
     def _choose_output_dir(self):
         current = self.output_dir_edit.text().strip() or os.path.expanduser("~")
-        path = QFileDialog.getExistingDirectory(
-            self,
-            OUTPUT_DIRECTORY_DIALOG_TITLE,
-            current,
-        )
+        path = QFileDialog.getExistingDirectory(self, OUTPUT_DIRECTORY_DIALOG_TITLE, current)
         if path:
             self.output_dir_edit.setText(path)
             self._persist_state()
@@ -724,23 +778,11 @@ class ArchAutoMapDockWidget(QDockWidget):
             else COLOR_BUTTON_TEXT_LIGHT
         )
         button.setStyleSheet(
-            build_color_button_stylesheet(
-                color.name(),
-                foreground,
-                DOCK_PALETTE.color_button_border,
-            )
+            build_color_button_stylesheet(color.name(), foreground, DOCK_PALETTE.color_button_border)
         )
 
-    def _add_style_rule_row(
-        self,
-        value: str = "",
-        fill_color_hex: str = DEFAULT_FILL_COLOR_HEX,
-    ):
-        row = AttributeRuleRow(
-            value=value,
-            fill_color_hex=fill_color_hex,
-            parent=self.style_rules_container,
-        )
+    def _add_style_rule_row(self, value: str = "", fill_color_hex: str = DEFAULT_FILL_COLOR_HEX):
+        row = AttributeRuleRow(value=value, fill_color_hex=fill_color_hex, parent=self.style_rules_container)
         row.changed.connect(self._persist_state)
         row.removed.connect(self._remove_style_rule_row)
         self._style_rule_rows.append(row)
@@ -799,17 +841,15 @@ class ArchAutoMapDockWidget(QDockWidget):
         self._update_preview_pixmap()
         self.occupancy_widget.set_ratio(preview.circle_ratio)
         self.metrics_label.setText(
-            "\n".join(
-                [
-                    f"가로 점유율: {preview.width_ratio * 100:.1f}%",
-                    f"세로 점유율: {preview.height_ratio * 100:.1f}%",
-                    f"판정: {preview.occupancy_label}",
-                    f"축척: 1:{preview.scale:,}",
-                    f"면적: {preview.area_m2:,.1f}㎡",
-                ]
-            )
+            "\n".join([
+                f"가로 점유율: {preview.width_ratio * 100:.1f}%",
+                f"세로 점유율: {preview.height_ratio * 100:.1f}%",
+                f"판정: {preview.occupancy_label}",
+                f"축척: 1:{preview.scale:,}",
+                f"면적: {preview.area_m2:,.1f}㎡",
+            ])
         )
-        self.progress_label.setText(f"미리보기 완료: {preview.name}")
+        self.progress_label.setText(f"✓ 미리보기 완료: {preview.name}")
         self.log(f"미리보기 완료: {preview.name}")
 
     def _on_export_current_clicked(self):
@@ -826,7 +866,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         finally:
             QApplication.restoreOverrideCursor()
 
-        self.progress_label.setText(f"현재 유적 출력 완료 ({len(paths)}개)")
+        self.progress_label.setText(f"✓ 출력 완료 ({len(paths)}개)")
         for path in paths:
             self.log(f"출력 완료: {path}")
 
@@ -839,7 +879,7 @@ class ArchAutoMapDockWidget(QDockWidget):
             return
 
         def progress_callback(index: int, total: int, name: str):
-            self.progress_label.setText(f"[{index}/{total}] {name}")
+            self.progress_label.setText(f"[{index}/{total}]  {name}")
             QApplication.processEvents()
 
         try:
@@ -852,10 +892,10 @@ class ArchAutoMapDockWidget(QDockWidget):
             QApplication.restoreOverrideCursor()
 
         self.progress_label.setText(
-            f"일괄 출력 완료: 성공 {summary.exported} / 실패 {summary.failed}"
+            f"✓ 완료: 성공 {summary.exported} / 실패 {summary.failed}"
         )
         self.log(
-            f"일괄 출력 완료: 총 {summary.total}, 성공 {summary.exported}, 실패 {summary.failed}, 폴더 {summary.output_dir}"
+            f"일괄 출력 완료: 총 {summary.total}, 성공 {summary.exported}, 실패 {summary.failed}"
         )
 
     def _current_feature_id(self) -> int:
@@ -884,10 +924,7 @@ class ArchAutoMapDockWidget(QDockWidget):
 
     def _serialize_style_rules(self) -> list[dict[str, str]]:
         return [
-            {
-                "value": rule.value,
-                "fill_color_hex": rule.fill_color_hex,
-            }
+            {"value": rule.value, "fill_color_hex": rule.fill_color_hex}
             for rule in self._collect_style_rules()
         ]
 
@@ -929,15 +966,10 @@ class ArchAutoMapDockWidget(QDockWidget):
         return ExportConfig(
             base_layer_id=base_layer.id(),
             fill_layer_id=fill_layer.id(),
-            outline_layer_id=(
-                self._current_layer_id(self.outline_layer_combo) or None
-            ),
+            outline_layer_id=(self._current_layer_id(self.outline_layer_combo) or None),
             name_field=name_field,
             area_field=area_field,
-            output_crs_authid=(
-                self.output_crs_edit.text().strip()
-                or DEFAULT_OUTPUT_CRS_AUTHID
-            ),
+            output_crs_authid=(self.output_crs_edit.text().strip() or DEFAULT_OUTPUT_CRS_AUTHID),
             style=StyleConfig(
                 enabled=self.style_group.isChecked(),
                 fill_color_hex=self._fill_color.name(),
@@ -961,113 +993,40 @@ class ArchAutoMapDockWidget(QDockWidget):
     def _persist_state(self):
         if self._is_loading_state:
             return
-
-        self.settings.set(
-            SettingsKey.BASE_LAYER_ID,
-            self._current_layer_id(self.base_layer_combo),
-        )
-        self.settings.set(
-            SettingsKey.FILL_LAYER_ID,
-            self._current_layer_id(self.fill_layer_combo),
-        )
-        self.settings.set(
-            SettingsKey.OUTLINE_LAYER_ID,
-            self._current_layer_id(self.outline_layer_combo),
-        )
+        self.settings.set(SettingsKey.BASE_LAYER_ID, self._current_layer_id(self.base_layer_combo))
+        self.settings.set(SettingsKey.FILL_LAYER_ID, self._current_layer_id(self.fill_layer_combo))
+        self.settings.set(SettingsKey.OUTLINE_LAYER_ID, self._current_layer_id(self.outline_layer_combo))
         self.settings.set(SettingsKey.NAME_FIELD, self.name_field_combo.currentText())
-        self.settings.set(
-            SettingsKey.AREA_FIELD,
-            self.area_field_combo.currentData() or "",
-        )
-        self.settings.set(
-            SettingsKey.OUTPUT_CRS_AUTHID,
-            self.output_crs_edit.text().strip(),
-        )
-        self.settings.set(
-            SettingsKey.LAYOUT_MODE,
-            self.layout_mode_combo.currentData(),
-        )
-        self.settings.set(
-            SettingsKey.LAYOUT_NAME,
-            self.layout_name_combo.currentText(),
-        )
-        self.settings.set(
-            SettingsKey.MAP_ITEM_ID,
-            self.map_item_id_combo.currentText(),
-        )
-        self.settings.set(
-            SettingsKey.STYLE_ENABLED,
-            self.style_group.isChecked(),
-        )
-        self.settings.set(
-            SettingsKey.STYLE_ATTRIBUTE_ENABLED,
-            self.attribute_style_checkbox.isChecked(),
-        )
-        self.settings.set(
-            SettingsKey.STYLE_ATTRIBUTE_FIELD,
-            self.attribute_style_field_combo.currentData() or "",
-        )
-        self.settings.set_json(
-            SettingsKey.STYLE_ATTRIBUTE_RULES,
-            self._serialize_style_rules(),
-        )
-        self.settings.set(
-            SettingsKey.FILL_COLOR_HEX,
-            self._fill_color.name(),
-        )
-        self.settings.set(
-            SettingsKey.OUTLINE_COLOR_HEX,
-            self._outline_color.name(),
-        )
-        self.settings.set(
-            SettingsKey.OUTLINE_WIDTH_MM,
-            self.outline_width_spin.value(),
-        )
-        self.settings.set(
-            SettingsKey.FEATURE_SEARCH,
-            self.feature_search_edit.text(),
-        )
-        self.settings.set(
-            SettingsKey.OUTPUT_MODE,
-            self.output_mode_combo.currentData(),
-        )
-        self.settings.set(
-            SettingsKey.OUTPUT_DIR,
-            self.output_dir_edit.text().strip(),
-        )
+        self.settings.set(SettingsKey.AREA_FIELD, self.area_field_combo.currentData() or "")
+        self.settings.set(SettingsKey.OUTPUT_CRS_AUTHID, self.output_crs_edit.text().strip())
+        self.settings.set(SettingsKey.LAYOUT_MODE, self.layout_mode_combo.currentData())
+        self.settings.set(SettingsKey.LAYOUT_NAME, self.layout_name_combo.currentText())
+        self.settings.set(SettingsKey.MAP_ITEM_ID, self.map_item_id_combo.currentText())
+        self.settings.set(SettingsKey.STYLE_ENABLED, self.style_group.isChecked())
+        self.settings.set(SettingsKey.STYLE_ATTRIBUTE_ENABLED, self.attribute_style_checkbox.isChecked())
+        self.settings.set(SettingsKey.STYLE_ATTRIBUTE_FIELD, self.attribute_style_field_combo.currentData() or "")
+        self.settings.set_json(SettingsKey.STYLE_ATTRIBUTE_RULES, self._serialize_style_rules())
+        self.settings.set(SettingsKey.FILL_COLOR_HEX, self._fill_color.name())
+        self.settings.set(SettingsKey.OUTLINE_COLOR_HEX, self._outline_color.name())
+        self.settings.set(SettingsKey.OUTLINE_WIDTH_MM, self.outline_width_spin.value())
+        self.settings.set(SettingsKey.FEATURE_SEARCH, self.feature_search_edit.text())
+        self.settings.set(SettingsKey.OUTPUT_MODE, self.output_mode_combo.currentData())
+        self.settings.set(SettingsKey.OUTPUT_DIR, self.output_dir_edit.text().strip())
         self.settings.set(SettingsKey.DPI, self.dpi_spin.value())
 
     def _load_state(self):
-        self._set_layer_if_present(
-            self.base_layer_combo,
-            self.settings.get(SettingsKey.BASE_LAYER_ID, ""),
-        )
-        self._set_layer_if_present(
-            self.fill_layer_combo,
-            self.settings.get(SettingsKey.FILL_LAYER_ID, ""),
-        )
-        self._set_layer_if_present(
-            self.outline_layer_combo,
-            self.settings.get(SettingsKey.OUTLINE_LAYER_ID, ""),
-        )
+        self._set_layer_if_present(self.base_layer_combo, self.settings.get(SettingsKey.BASE_LAYER_ID, ""))
+        self._set_layer_if_present(self.fill_layer_combo, self.settings.get(SettingsKey.FILL_LAYER_ID, ""))
+        self._set_layer_if_present(self.outline_layer_combo, self.settings.get(SettingsKey.OUTLINE_LAYER_ID, ""))
 
-        self.output_crs_edit.setText(
-            self.settings.get(SettingsKey.OUTPUT_CRS_AUTHID),
-        )
+        self.output_crs_edit.setText(self.settings.get(SettingsKey.OUTPUT_CRS_AUTHID))
         self.feature_search_edit.blockSignals(True)
-        self.feature_search_edit.setText(
-            self.settings.get(SettingsKey.FEATURE_SEARCH, ""),
-        )
+        self.feature_search_edit.setText(self.settings.get(SettingsKey.FEATURE_SEARCH, ""))
         self.feature_search_edit.blockSignals(False)
-        self.output_dir_edit.setText(
-            self.settings.get(SettingsKey.OUTPUT_DIR, ""),
-        )
+        self.output_dir_edit.setText(self.settings.get(SettingsKey.OUTPUT_DIR, ""))
         self.dpi_spin.setValue(self.settings.get_int(SettingsKey.DPI, DEFAULT_DPI))
         self.outline_width_spin.setValue(
-            self.settings.get_float(
-                SettingsKey.OUTLINE_WIDTH_MM,
-                DEFAULT_OUTLINE_WIDTH_MM,
-            )
+            self.settings.get_float(SettingsKey.OUTLINE_WIDTH_MM, DEFAULT_OUTLINE_WIDTH_MM)
         )
 
         fill_color_hex = self.settings.get(SettingsKey.FILL_COLOR_HEX)
@@ -1076,69 +1035,37 @@ class ArchAutoMapDockWidget(QDockWidget):
         self._outline_color = QColor(outline_color_hex)
         self._apply_button_color(self.fill_color_button, self._fill_color)
         self._apply_button_color(self.outline_color_button, self._outline_color)
-        self.style_group.setChecked(
-            self.settings.get_bool(SettingsKey.STYLE_ENABLED, False),
-        )
+        self.style_group.setChecked(self.settings.get_bool(SettingsKey.STYLE_ENABLED, False))
         self.attribute_style_checkbox.setChecked(
-            self.settings.get_bool(
-                SettingsKey.STYLE_ATTRIBUTE_ENABLED,
-                False,
-            )
+            self.settings.get_bool(SettingsKey.STYLE_ATTRIBUTE_ENABLED, False)
         )
 
-        layout_mode = self.settings.get(
-            SettingsKey.LAYOUT_MODE,
-            EXISTING_LAYOUT_MODE,
-        )
+        layout_mode = self.settings.get(SettingsKey.LAYOUT_MODE, EXISTING_LAYOUT_MODE)
         self._restore_combo_data(self.layout_mode_combo, layout_mode)
 
         layout_name = self.settings.get(SettingsKey.LAYOUT_NAME, "")
         self._restore_combo_text(self.layout_name_combo, layout_name)
 
         self._refresh_map_item_ids()
-        self._restore_combo_text(
-            self.map_item_id_combo,
-            self.settings.get(SettingsKey.MAP_ITEM_ID, ""),
-        )
-
+        self._restore_combo_text(self.map_item_id_combo, self.settings.get(SettingsKey.MAP_ITEM_ID, ""))
         self._restore_combo_data(
-            self.output_mode_combo,
-            self.settings.get(SettingsKey.OUTPUT_MODE, OUTPUT_MODE_FINAL_ONLY),
+            self.output_mode_combo, self.settings.get(SettingsKey.OUTPUT_MODE, OUTPUT_MODE_FINAL_ONLY)
         )
-
         self._on_layout_mode_changed()
-
-        self._restore_combo_text(
-            self.name_field_combo,
-            self.settings.get(SettingsKey.NAME_FIELD, ""),
-        )
+        self._restore_combo_text(self.name_field_combo, self.settings.get(SettingsKey.NAME_FIELD, ""))
+        self._restore_combo_data(self.area_field_combo, self.settings.get(SettingsKey.AREA_FIELD, ""))
         self._restore_combo_data(
-            self.area_field_combo,
-            self.settings.get(SettingsKey.AREA_FIELD, ""),
-        )
-        self._restore_combo_data(
-            self.attribute_style_field_combo,
-            self.settings.get(SettingsKey.STYLE_ATTRIBUTE_FIELD, ""),
+            self.attribute_style_field_combo, self.settings.get(SettingsKey.STYLE_ATTRIBUTE_FIELD, "")
         )
 
         self._clear_style_rule_rows()
-        rules = self.settings.get_json(
-            SettingsKey.STYLE_ATTRIBUTE_RULES,
-            [],
-        ) or []
-
+        rules = self.settings.get_json(SettingsKey.STYLE_ATTRIBUTE_RULES, []) or []
         for rule in rules:
             value = str(rule.get("value", "")).strip()
             if not value:
                 continue
             fill_color_hex = (
-                str(
-                    rule.get(
-                        "fill_color_hex",
-                        DEFAULT_FILL_COLOR_HEX,
-                    )
-                ).strip()
-                or DEFAULT_FILL_COLOR_HEX
+                str(rule.get("fill_color_hex", DEFAULT_FILL_COLOR_HEX)).strip() or DEFAULT_FILL_COLOR_HEX
             )
             self._add_style_rule_row(value=value, fill_color_hex=fill_color_hex)
 
@@ -1153,7 +1080,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.log_edit.appendPlainText(message)
 
     def _show_error(self, title: str, error: Exception):
-        self.log(f"{title}: {error}")
+        self.log(f"⚠ {title}: {error}")
         QMessageBox.warning(self, title, str(error))
 
     def _cleanup_preview_file(self):
@@ -1164,3 +1091,9 @@ class ArchAutoMapDockWidget(QDockWidget):
                 pass
         self._preview_image_path = None
         self._preview_pixmap = None
+
+
+def _SectionLabel(text: str, parent=None) -> QLabel:  # noqa: N802
+    label = QLabel(text, parent)
+    label.setObjectName("SectionCaption")
+    return label

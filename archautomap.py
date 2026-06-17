@@ -51,15 +51,21 @@ class ArchAutoMap:
             self.toolbar = None
 
         if self.dock_widget is not None:
-            self.iface.removeDockWidget(self.dock_widget)
+            try:
+                self.iface.removeDockWidget(self.dock_widget)
+            except Exception:  # pylint: disable=broad-except
+                pass
             self.dock_widget.deleteLater()
             self.dock_widget = None
 
     def show_dock(self):
         if self.dock_widget is None:
-            self.dock_widget = ArchAutoMapDockWidget(self.iface)
+            self.dock_widget = ArchAutoMapDockWidget(self.iface, self.iface.mainWindow())
             self.dock_widget.setObjectName(DOCK_WIDGET_OBJECT_NAME)
+            # QGIS에 등록해야 창 위치가 저장/복원되므로 addDockWidget 후 즉시 float
             self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock_widget)
+            self.dock_widget.setFloating(True)
 
         self.dock_widget.show()
         self.dock_widget.raise_()
+        self.dock_widget.activateWindow()
