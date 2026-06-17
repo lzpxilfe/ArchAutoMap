@@ -38,6 +38,7 @@ class SettingsKey:
     OUTPUT_DIR = "output_dir"
     DPI = "dpi"
     TARGET_OCCUPANCY_RATIO = "target_occupancy_ratio"
+    USE_STANDARD_SCALES = "use_standard_scales"
 
 
 SETTINGS_DEFAULTS = {
@@ -48,6 +49,7 @@ SETTINGS_DEFAULTS = {
     SettingsKey.OUTPUT_MODE: OUTPUT_MODE_FINAL_ONLY,
     SettingsKey.DPI: DEFAULT_DPI,
     SettingsKey.TARGET_OCCUPANCY_RATIO: DEFAULT_TARGET_OCCUPANCY_RATIO,
+    SettingsKey.USE_STANDARD_SCALES: True,
     SettingsKey.STYLE_ATTRIBUTE_RULES: [],
 }
 

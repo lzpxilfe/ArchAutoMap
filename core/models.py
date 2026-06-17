@@ -51,6 +51,7 @@ class ExportConfig:
     output_dir: str = ""
     preview_dpi: int = DEFAULT_PREVIEW_DPI
     target_occupancy_ratio: float = 0.60
+    use_standard_scales: bool = True
 
 
 @dataclass(frozen=True)

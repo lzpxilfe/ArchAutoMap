@@ -439,6 +439,20 @@ class ArchAutoMapDockWidget(QDockWidget):
             "도면 내에서 유적이 차지하는 최대 비율입니다. 값을 낮출수록 주변 지형 맥락이 더 많이 포함됩니다 (기본값: 60%)."
         )
 
+        self.use_standard_scales_checkbox = QCheckBox("정규 축척 사용")
+        self.use_standard_scales_checkbox.setChecked(True)
+        self.use_standard_scales_checkbox.setToolTip(
+            "도면 축척을 임의 소수점 대신 1:1,000, 1:5,000 같은 정규 표준 축척 단계로 올림 적용합니다."
+        )
+
+        # 점유율 및 정규 축척 설정 행
+        occupancy_row = QHBoxLayout()
+        occupancy_row.setSpacing(10)
+        occupancy_row.addWidget(self.target_occupancy_spin)
+        occupancy_row.addWidget(self.use_standard_scales_checkbox)
+        occupancy_container = QWidget()
+        occupancy_container.setLayout(occupancy_row)
+
         self.layout_mode_combo = QComboBox()
         self.layout_mode_combo.addItem("기존 Layout 사용", EXISTING_LAYOUT_MODE)
         self.layout_mode_combo.addItem("자동 Layout 생성", AUTO_LAYOUT_MODE)
@@ -470,7 +484,7 @@ class ArchAutoMapDockWidget(QDockWidget):
             ("배경 레이어", self.base_layer_combo, False),
             ("유적명 필드", self.name_field_combo, False),
             ("면적 필드", self.area_field_combo, False),
-            ("도면 내 유적 점유율", self.target_occupancy_spin, False),
+            ("도면 내 유적 점유율", occupancy_container, False),
             ("출력 CRS", self.output_crs_edit, False),
             ("Layout 모드", self.layout_mode_combo, False),
             ("Layout 이름", self.layout_name_combo, False),
@@ -699,6 +713,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.dpi_spin.valueChanged.connect(self._persist_state)
         self.outline_width_spin.valueChanged.connect(self._persist_state)
         self.target_occupancy_spin.valueChanged.connect(self._persist_state)
+        self.use_standard_scales_checkbox.toggled.connect(self._persist_state)
         self.style_group.toggled.connect(self._on_style_group_toggled)
         self.attribute_style_checkbox.toggled.connect(self._on_attribute_style_toggled)
         self.attribute_style_field_combo.currentIndexChanged.connect(self._persist_state)
@@ -1105,6 +1120,7 @@ class ArchAutoMapDockWidget(QDockWidget):
             output_mode=self.output_mode_combo.currentData(),
             output_dir=output_dir,
             target_occupancy_ratio=self.target_occupancy_spin.value() / 100.0,
+            use_standard_scales=self.use_standard_scales_checkbox.isChecked(),
         )
 
     def _persist_state(self):
@@ -1131,6 +1147,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.settings.set(SettingsKey.OUTPUT_DIR, self.output_dir_edit.text().strip())
         self.settings.set(SettingsKey.DPI, self.dpi_spin.value())
         self.settings.set(SettingsKey.TARGET_OCCUPANCY_RATIO, self.target_occupancy_spin.value())
+        self.settings.set(SettingsKey.USE_STANDARD_SCALES, self.use_standard_scales_checkbox.isChecked())
 
     def _load_state(self):
         self._set_layer_if_present(self.base_layer_combo, self.settings.get(SettingsKey.BASE_LAYER_ID, ""))
@@ -1154,6 +1171,10 @@ class ArchAutoMapDockWidget(QDockWidget):
             self.target_occupancy_spin.setValue(int(val))
         else:
             self.target_occupancy_spin.setValue(int(DEFAULT_TARGET_OCCUPANCY_RATIO * 100))
+
+        self.use_standard_scales_checkbox.setChecked(
+            self.settings.get_bool(SettingsKey.USE_STANDARD_SCALES, True)
+        )
 
         fill_color_hex = self.settings.get(SettingsKey.FILL_COLOR_HEX)
         outline_color_hex = self.settings.get(SettingsKey.OUTLINE_COLOR_HEX)

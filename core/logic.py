@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+from .constants import STANDARD_SCALES
+
 TARGET_OCCUPANCY_RATIO = 0.60
 MIN_EXPORT_SCALE = 3000
 MAX_EXPORT_SCALE = 50000
@@ -60,6 +62,13 @@ def occupancy_ratios(
     return feature_width_m / extent_width_m, feature_height_m / extent_height_m
 
 
+def round_to_standard_scale(scale: float, standard_scales: tuple[int, ...] = STANDARD_SCALES) -> int:
+    for std in standard_scales:
+        if std >= scale:
+            return std
+    return int(round(scale))
+
+
 def adjusted_scale_from_bbox(
     base_scale: float,
     feature_width_m: float,
@@ -69,6 +78,7 @@ def adjusted_scale_from_bbox(
     target_ratio: float = TARGET_OCCUPANCY_RATIO,
     minimum_scale: float = MIN_EXPORT_SCALE,
     maximum_scale: float = MAX_EXPORT_SCALE,
+    use_standard_scales: bool = True,
 ) -> int:
     clamped_base = clamp(base_scale, minimum_scale, maximum_scale)
     width_ratio, height_ratio = occupancy_ratios(
@@ -83,7 +93,10 @@ def adjusted_scale_from_bbox(
         return int(round(clamped_base))
 
     adjusted = clamped_base * (current_ratio / target_ratio)
-    return int(round(clamp(adjusted, minimum_scale, maximum_scale)))
+    clamped_adjusted = clamp(adjusted, minimum_scale, maximum_scale)
+    if use_standard_scales:
+        return round_to_standard_scale(clamped_adjusted, STANDARD_SCALES)
+    return int(round(clamped_adjusted))
 
 
 def occupancy_status(occupancy_ratio: float) -> str:

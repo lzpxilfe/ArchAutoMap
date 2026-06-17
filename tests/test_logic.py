@@ -7,6 +7,7 @@ from core.logic import (
     circle_ratio,
     occupancy_status,
     resolve_fill_color,
+    round_to_standard_scale,
     sanitize_filename,
     scale_from_area,
     unique_output_path,
@@ -24,23 +25,58 @@ class LogicTests(unittest.TestCase):
         self.assertEqual(scale_from_area(500000), 24000)
 
     def test_adjusted_scale_respects_target_ratio_and_clamp(self):
-        scale = adjusted_scale_from_bbox(
+        # With standard scales disabled
+        scale_raw = adjusted_scale_from_bbox(
             base_scale=16000,
             feature_width_m=320,
             feature_height_m=140,
             map_width_mm=105,
             map_height_mm=80,
+            use_standard_scales=False,
         )
-        self.assertEqual(scale, 5079)
+        self.assertEqual(scale_raw, 5079)
 
-        tiny_scale = adjusted_scale_from_bbox(
+        # With standard scales enabled (rounds 5079 up to 6000)
+        scale_std = adjusted_scale_from_bbox(
+            base_scale=16000,
+            feature_width_m=320,
+            feature_height_m=140,
+            map_width_mm=105,
+            map_height_mm=80,
+            use_standard_scales=True,
+        )
+        self.assertEqual(scale_std, 6000)
+
+        # Tiny scale without standard scales
+        tiny_scale_raw = adjusted_scale_from_bbox(
             base_scale=9000,
             feature_width_m=40,
             feature_height_m=20,
             map_width_mm=105,
             map_height_mm=80,
+            use_standard_scales=False,
         )
-        self.assertEqual(tiny_scale, 3000)
+        self.assertEqual(tiny_scale_raw, 3000)
+
+        # Tiny scale with standard scales (3000 is already a standard scale)
+        tiny_scale_std = adjusted_scale_from_bbox(
+            base_scale=9000,
+            feature_width_m=40,
+            feature_height_m=20,
+            map_width_mm=105,
+            map_height_mm=80,
+            use_standard_scales=True,
+        )
+        self.assertEqual(tiny_scale_std, 3000)
+
+    def test_round_to_standard_scale(self):
+        # standard_scales = (500, 600, 1000, 1200, 1500, 2000, 2500, 3000, 5000, 6000, 10000, 12000, 15000, 20000, 25000, 50000)
+        self.assertEqual(round_to_standard_scale(450), 500)
+        self.assertEqual(round_to_standard_scale(500), 500)
+        self.assertEqual(round_to_standard_scale(550), 600)
+        self.assertEqual(round_to_standard_scale(1201), 1500)
+        self.assertEqual(round_to_standard_scale(45000), 50000)
+        self.assertEqual(round_to_standard_scale(60000), 60000)
 
     def test_occupancy_status(self):
         self.assertEqual(occupancy_status(0.20), "작음")
