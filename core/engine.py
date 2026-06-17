@@ -10,6 +10,7 @@ from qgis.core import (
     QgsExpression,
     QgsFeature,
     QgsFeatureRequest,
+    QgsFields,
     QgsFillSymbol,
     QgsGeometry,
     QgsLayoutExporter,
@@ -230,7 +231,13 @@ class ArchAutoMapEngine:
     def export_all(self, config: ExportConfig, progress_callback=None) -> ExportSummary:
         fill_layer = self._require_vector_layer(config.fill_layer_id, "유적 채움")
         features = self._list_named_features(fill_layer, config.name_field)
-        outline_lookup = self._build_outline_lookup(config)
+
+        # 외곽선 lookup 구성 실패 시 graceful fallback
+        try:
+            outline_lookup = self._build_outline_lookup(config)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.log(f"외곽선 lookup 구성 실패 (외곽선 없이 진행): {exc}")
+            outline_lookup = None
 
         os.makedirs(config.output_dir, exist_ok=True)
         total = len(features)
@@ -249,8 +256,7 @@ class ArchAutoMapEngine:
                 exported += 1
             except Exception as exc:  # pylint: disable=broad-except
                 failed += 1
-                name_fallback = f"feature_{index}"
-                self.log(f"[{index}/{total}] 실패: {name_fallback} ({exc})")
+                self.log(f"[{index}/{total}] 실패: feature_{index} ({exc})")
 
         return ExportSummary(
             total=total,
@@ -455,12 +461,26 @@ class ArchAutoMapEngine:
         if max_matches:
             request.setLimit(max_matches)
 
+        outline_fields = outline_layer.fields()
         for feature in outline_layer.getFeatures(request):
-            raw_name = feature[config.name_field]
+            # 서자명 키 접근 보장: fields를 명시한 safe copy
+            try:
+                raw_name = feature[config.name_field]
+            except Exception:  # pylint: disable=broad-except
+                idx = outline_fields.indexOf(config.name_field)
+                attrs = feature.attributes()
+                raw_name = attrs[idx] if 0 <= idx < len(attrs) else None
             name = str(raw_name).strip() if raw_name not in (None, "") else ""
             if not name:
                 continue
-            lookup.setdefault(name, []).append(QgsFeature(feature))
+            safe = QgsFeature(outline_fields)
+            safe.setGeometry(feature.geometry())
+            attrs = feature.attributes()
+            if len(attrs) >= outline_fields.count():
+                safe.setAttributes(attrs[:outline_fields.count()])
+            else:
+                safe.setAttributes(attrs + [None] * (outline_fields.count() - len(attrs)))
+            lookup.setdefault(name, []).append(safe)
         return lookup
 
     def _contains_expression(self, field_name: str, lowered_search: str) -> str:
@@ -511,7 +531,16 @@ class ArchAutoMapEngine:
         if geometry.isEmpty():
             self.log(f"외곽선 '{name}' geometry가 비어 있어 채움 geometry를 재사용합니다.")
             return None, QgsGeometry(fallback_geometry)
-        return QgsFeature(outline_feature), geometry
+        # fields를 명시한 safe copy
+        fields = outline_layer.fields()
+        safe = QgsFeature(fields)
+        safe.setGeometry(outline_feature.geometry())
+        attrs = outline_feature.attributes()
+        if len(attrs) >= fields.count():
+            safe.setAttributes(attrs[:fields.count()])
+        else:
+            safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
+        return safe, geometry
 
     def _list_named_features(self, fill_layer: QgsVectorLayer, name_field: str) -> list[QgsFeature]:
         if fill_layer.fields().indexOf(name_field) < 0:

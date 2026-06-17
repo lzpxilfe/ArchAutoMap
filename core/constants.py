@@ -389,4 +389,32 @@ def build_dock_stylesheet(palette: DockPalette = DOCK_PALETTE) -> str:
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
                 width: 0px;
             }}
+            QPushButton#CollapsibleHeader {{
+                background: {palette.surface};
+                color: {palette.title};
+                border: 1px solid {palette.border};
+                border-radius: 10px;
+                padding: 8px 14px;
+                text-align: left;
+                font-weight: 700;
+                font-size: 12px;
+            }}
+            QPushButton#CollapsibleHeader:checked {{
+                background: {palette.surface_alt};
+                border-color: {palette.border_focus};
+                border-bottom-left-radius: 0;
+                border-bottom-right-radius: 0;
+            }}
+            QPushButton#CollapsibleHeader:hover {{
+                background: {palette.surface_hover};
+                border-color: {palette.neutral_hover};
+            }}
+            QWidget#CollapsibleContent {{
+                background: {palette.surface};
+                border: 1px solid {palette.border_focus};
+                border-top: none;
+                border-bottom-left-radius: 10px;
+                border-bottom-right-radius: 10px;
+            }}
             """
+

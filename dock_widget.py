@@ -202,6 +202,85 @@ class _SectionLabel(QLabel):
         self.setObjectName("SectionCaption")
 
 
+class CollapsibleSection(QWidget):
+    """접고 펼칠 수 있는 섹션 위젯.
+
+    isChecked() / setChecked() / toggled 시그널을 통해
+    QGroupBox(checkable) 과 동일한 인터페이스를 제공합니다.
+    """
+
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self._title = title
+        self._checked = False
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # 헤더 토글 버튼
+        self._btn = QPushButton(f"▶   {title}")
+        self._btn.setObjectName("CollapsibleHeader")
+        self._btn.setCheckable(True)
+        self._btn.setChecked(False)
+        self._btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._btn.setMinimumHeight(36)
+        self._btn.toggled.connect(self._on_toggled)
+
+        # 콘텐츠 영역
+        self._content_widget = QWidget()
+        self._content_widget.setObjectName("CollapsibleContent")
+        self._content_layout = QFormLayout(self._content_widget)
+        self._content_layout.setContentsMargins(14, 10, 14, 12)
+        self._content_layout.setLabelAlignment(Qt.AlignTop)
+        self._content_layout.setFormAlignment(Qt.AlignTop)
+        self._content_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self._content_layout.setSpacing(8)
+        self._content_widget.setVisible(False)
+
+        outer.addWidget(self._btn)
+        outer.addWidget(self._content_widget)
+
+    # ── 공개 인터페이스 ───────────────────────────────────────────
+
+    def isChecked(self) -> bool:  # noqa: N802
+        return self._checked
+
+    def setChecked(self, checked: bool):  # noqa: N802
+        if self._btn.isChecked() != checked:
+            self._btn.setChecked(checked)
+        # _on_toggled 가 알아서 _checked 갱신
+
+    @property
+    def form_layout(self) -> QFormLayout:
+        return self._content_layout
+
+    def add_row(self, label, widget):
+        """QFormLayout.addRow 래퍼."""
+        if isinstance(label, str):
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"color: {DOCK_PALETTE.text_soft}; font-size: 11px;")
+            self._content_layout.addRow(lbl, widget)
+        else:
+            self._content_layout.addRow(label, widget)
+
+    def add_full_row(self, widget):
+        """라벨 없는 전체 너비 행."""
+        self._content_layout.addRow(widget)
+
+    # ── 내부 ─────────────────────────────────────────────────────
+
+    def _on_toggled(self, checked: bool):
+        self._checked = checked
+        self._content_widget.setVisible(checked)
+        self._btn.setText(f"{'▼' if checked else '▶'}   {self._title}")
+        self.toggled.emit(checked)
+
+
+
+
 class ArchAutoMapDockWidget(QDockWidget):
     """QGIS DockWidget 래퍼 — 내부적으로 독립 다이얼로그를 포함합니다."""
 
@@ -377,14 +456,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         return group
 
     def _build_style_group(self):
-        self.style_group = QGroupBox("표현 설정 (선택)")
-        self.style_group.setCheckable(True)
-        self.style_group.setChecked(False)
-        layout = QFormLayout(self.style_group)
-        layout.setLabelAlignment(Qt.AlignTop)
-        layout.setFormAlignment(Qt.AlignTop)
-        layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        layout.setSpacing(8)
+        self.style_group = CollapsibleSection("표현 설정 (선택)")
 
         note = QLabel(
             "기본값은 원래 레이어 심볼을 사용합니다. "
@@ -418,9 +490,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.add_style_rule_button = QPushButton("＋  색상 규칙 추가")
         self.add_style_rule_button.setObjectName("NeutralButton")
 
-        rules_help = QLabel(
-            "일치하지 않는 속성값은 기본 채움색을 사용합니다."
-        )
+        rules_help = QLabel("일치하지 않는 속성값은 기본 채움색을 사용합니다.")
         rules_help.setObjectName("HelpText")
         rules_help.setWordWrap(True)
 
@@ -434,11 +504,11 @@ class ArchAutoMapDockWidget(QDockWidget):
         rb_layout.addWidget(self.add_style_rule_button, alignment=Qt.AlignLeft)
         rb_layout.addWidget(rules_help)
 
-        layout.addRow(note)
-        layout.addRow("기본 채움색", self.fill_color_button)
-        layout.addRow("외곽선 색", self.outline_color_button)
-        layout.addRow("외곽선 두께", self.outline_width_spin)
-        layout.addRow("속성값별 채움색", rules_box)
+        self.style_group.add_full_row(note)
+        self.style_group.add_row("기본 채움색", self.fill_color_button)
+        self.style_group.add_row("외곽선 색", self.outline_color_button)
+        self.style_group.add_row("외곽선 두께", self.outline_width_spin)
+        self.style_group.add_row("속성값별 채움색", rules_box)
         return self.style_group
 
     def _build_preview_group(self):
