@@ -49,6 +49,7 @@ from .core.constants import (
     DEFAULT_OUTPUT_CRS_AUTHID,
     DEFAULT_OUTLINE_COLOR_HEX,
     DEFAULT_OUTLINE_WIDTH_MM,
+    DEFAULT_TARGET_OCCUPANCY_RATIO,
     DOCK_DIMENSIONS,
     DOCK_PALETTE,
     DOCK_WIDGET_OBJECT_NAME,
@@ -429,6 +430,15 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.area_field_combo = QComboBox()
         self.output_crs_edit = QLineEdit(DEFAULT_OUTPUT_CRS_AUTHID)
 
+        self.target_occupancy_spin = QSpinBox()
+        self.target_occupancy_spin.setRange(10, 95)
+        self.target_occupancy_spin.setSingleStep(5)
+        self.target_occupancy_spin.setValue(60)
+        self.target_occupancy_spin.setSuffix(" %")
+        self.target_occupancy_spin.setToolTip(
+            "도면 내에서 유적이 차지하는 최대 비율입니다. 값을 낮출수록 주변 지형 맥락이 더 많이 포함됩니다 (기본값: 60%)."
+        )
+
         self.layout_mode_combo = QComboBox()
         self.layout_mode_combo.addItem("기존 Layout 사용", EXISTING_LAYOUT_MODE)
         self.layout_mode_combo.addItem("자동 Layout 생성", AUTO_LAYOUT_MODE)
@@ -460,16 +470,20 @@ class ArchAutoMapDockWidget(QDockWidget):
             ("배경 레이어", self.base_layer_combo, False),
             ("유적명 필드", self.name_field_combo, False),
             ("면적 필드", self.area_field_combo, False),
+            ("도면 내 유적 점유율", self.target_occupancy_spin, False),
             ("출력 CRS", self.output_crs_edit, False),
             ("Layout 모드", self.layout_mode_combo, False),
             ("Layout 이름", self.layout_name_combo, False),
             ("Map Item ID", self.map_item_id_combo, False),
         ]
+        layout_name_row = 8  # fallback
         for row_idx, (label_text, widget, important) in enumerate(rows):
             layout.addWidget(_lbl(label_text, important), row_idx, 0, Qt.AlignRight | Qt.AlignVCenter)
             layout.addWidget(widget, row_idx, 1)
+            if widget == self.layout_name_combo:
+                layout_name_row = row_idx
 
-        layout.addWidget(self.refresh_layouts_button, 8, 2)
+        layout.addWidget(self.refresh_layouts_button, layout_name_row, 2)
 
         return group
 
@@ -684,6 +698,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.output_mode_combo.currentIndexChanged.connect(self._persist_state)
         self.dpi_spin.valueChanged.connect(self._persist_state)
         self.outline_width_spin.valueChanged.connect(self._persist_state)
+        self.target_occupancy_spin.valueChanged.connect(self._persist_state)
         self.style_group.toggled.connect(self._on_style_group_toggled)
         self.attribute_style_checkbox.toggled.connect(self._on_attribute_style_toggled)
         self.attribute_style_field_combo.currentIndexChanged.connect(self._persist_state)
@@ -1089,6 +1104,7 @@ class ArchAutoMapDockWidget(QDockWidget):
             dpi=self.dpi_spin.value(),
             output_mode=self.output_mode_combo.currentData(),
             output_dir=output_dir,
+            target_occupancy_ratio=self.target_occupancy_spin.value() / 100.0,
         )
 
     def _persist_state(self):
@@ -1114,6 +1130,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.settings.set(SettingsKey.OUTPUT_MODE, self.output_mode_combo.currentData())
         self.settings.set(SettingsKey.OUTPUT_DIR, self.output_dir_edit.text().strip())
         self.settings.set(SettingsKey.DPI, self.dpi_spin.value())
+        self.settings.set(SettingsKey.TARGET_OCCUPANCY_RATIO, self.target_occupancy_spin.value())
 
     def _load_state(self):
         self._set_layer_if_present(self.base_layer_combo, self.settings.get(SettingsKey.BASE_LAYER_ID, ""))
@@ -1129,6 +1146,14 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.outline_width_spin.setValue(
             self.settings.get_float(SettingsKey.OUTLINE_WIDTH_MM, DEFAULT_OUTLINE_WIDTH_MM)
         )
+
+        val = self.settings.get(SettingsKey.TARGET_OCCUPANCY_RATIO)
+        if isinstance(val, float) and val <= 1.0:
+            self.target_occupancy_spin.setValue(int(round(val * 100)))
+        elif val is not None:
+            self.target_occupancy_spin.setValue(int(val))
+        else:
+            self.target_occupancy_spin.setValue(int(DEFAULT_TARGET_OCCUPANCY_RATIO * 100))
 
         fill_color_hex = self.settings.get(SettingsKey.FILL_COLOR_HEX)
         outline_color_hex = self.settings.get(SettingsKey.OUTLINE_COLOR_HEX)
