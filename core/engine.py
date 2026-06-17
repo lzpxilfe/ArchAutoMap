@@ -239,17 +239,18 @@ class ArchAutoMapEngine:
         used_paths: set[str] = set()
 
         for index, feature in enumerate(features, start=1):
-            name = self._feature_name(feature, config.name_field)
-            if progress_callback is not None:
-                progress_callback(index, total, name)
-
+            # _feature_name도 try-except 안에 포함해 개별 오류가 전체를 중단시키지 않도록
             try:
+                name = self._feature_name(feature, config.name_field) or f"feature_{index}"
+                if progress_callback is not None:
+                    progress_callback(index, total, name)
                 self.log(f"[{index}/{total}] 출력 중: {name}")
                 self._export_feature(config, feature, outline_lookup, used_paths)
                 exported += 1
             except Exception as exc:  # pylint: disable=broad-except
                 failed += 1
-                self.log(f"[{index}/{total}] 실패: {name} ({exc})")
+                name_fallback = f"feature_{index}"
+                self.log(f"[{index}/{total}] 실패: {name_fallback} ({exc})")
 
         return ExportSummary(
             total=total,
@@ -516,10 +517,15 @@ class ArchAutoMapEngine:
         if fill_layer.fields().indexOf(name_field) < 0:
             raise ArchAutoMapError("유적명 필드가 유적 채움 레이어에 없습니다.")
 
+        fields = fill_layer.fields()
         features = []
         for feature in fill_layer.getFeatures():
             if self._feature_name(feature, name_field):
-                features.append(QgsFeature(feature))
+                # fields를 명시적으로 지정해 복사해야 문자열 키 접근이 보장됨
+                copied = QgsFeature(fields)
+                copied.setGeometry(feature.geometry())
+                copied.setAttributes(feature.attributes())
+                features.append(copied)
         return sorted(features, key=lambda item: (self._feature_name(item, name_field), item.id()))
 
     def _get_fill_feature(self, config: ExportConfig, feature_id: int) -> QgsFeature:
@@ -527,7 +533,12 @@ class ArchAutoMapEngine:
         feature = next(fill_layer.getFeatures(QgsFeatureRequest().setFilterFid(feature_id)), None)
         if feature is None:
             raise ArchAutoMapError(f"선택한 유적을 찾을 수 없습니다. fid={feature_id}")
-        return QgsFeature(feature)
+        # fields를 명시적으로 지정해 복사해야 문자열 키 접근이 보장됨
+        fields = fill_layer.fields()
+        copied = QgsFeature(fields)
+        copied.setGeometry(feature.geometry())
+        copied.setAttributes(feature.attributes())
+        return copied
 
     def _feature_name(self, feature: QgsFeature, name_field: str) -> str:
         raw_name = feature[name_field] if name_field in feature.fields().names() else None
