@@ -42,7 +42,6 @@ from .logic import (
     occupancy_status,
     resolve_fill_color,
     sanitize_filename,
-    scale_from_area,
     unique_output_path,
 )
 from .models import (
@@ -332,9 +331,7 @@ class ArchAutoMapEngine:
             raise ArchAutoMapError(f"유효하지 않은 bbox입니다: {raw_name}")
 
         map_width_mm, map_height_mm = self._map_item_size_mm(map_item)
-        base_scale = scale_from_area(area_m2)
         final_scale = adjusted_scale_from_bbox(
-            base_scale=base_scale,
             feature_width_m=bbox.width(),
             feature_height_m=bbox.height(),
             map_width_mm=map_width_mm,

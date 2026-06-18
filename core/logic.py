@@ -4,35 +4,16 @@ import os
 
 from .constants import STANDARD_SCALES
 
+# target_occupancy_ratio의 기본값 – UI에서 config로 전달되므로 여기서는 참조용으로만 사용
 TARGET_OCCUPANCY_RATIO = 0.60
-MIN_EXPORT_SCALE = 3000
-MAX_EXPORT_SCALE = 50000
 
-SCALE_RULES = (
-    (20000, 9000),
-    (100000, 11000),
-    (150000, 13000),
-    (210000, 16000),
-    (240000, 18000),
-    (400000, 20000),
-)
-DEFAULT_LARGE_SCALE = 24000
+# 표준 축척 목록의 최솟값/최댓값과 일치시킴
+MIN_EXPORT_SCALE = STANDARD_SCALES[0]   # 500
+MAX_EXPORT_SCALE = STANDARD_SCALES[-1]  # 50000
 
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
-
-
-def scale_from_area(area_m2: float) -> int:
-    try:
-        numeric_area = float(area_m2)
-    except (TypeError, ValueError):
-        numeric_area = 0.0
-
-    for threshold, scale in SCALE_RULES:
-        if numeric_area < threshold:
-            return scale
-    return DEFAULT_LARGE_SCALE
 
 
 def extent_dimensions_for_scale(
@@ -63,6 +44,8 @@ def occupancy_ratios(
 
 
 def round_to_standard_scale(scale: float, standard_scales: tuple[int, ...] = STANDARD_SCALES) -> int:
+    """scale 이상인 가장 작은 표준 축척을 반환한다.
+    표준 목록을 초과하면 그냥 반올림 값을 반환한다."""
     for std in standard_scales:
         if std >= scale:
             return std
@@ -70,7 +53,6 @@ def round_to_standard_scale(scale: float, standard_scales: tuple[int, ...] = STA
 
 
 def adjusted_scale_from_bbox(
-    base_scale: float,
     feature_width_m: float,
     feature_height_m: float,
     map_width_mm: float,
@@ -80,23 +62,27 @@ def adjusted_scale_from_bbox(
     maximum_scale: float = MAX_EXPORT_SCALE,
     use_standard_scales: bool = True,
 ) -> int:
-    clamped_base = clamp(base_scale, minimum_scale, maximum_scale)
-    width_ratio, height_ratio = occupancy_ratios(
-        feature_width_m=feature_width_m,
-        feature_height_m=feature_height_m,
-        scale=clamped_base,
-        map_width_mm=map_width_mm,
-        map_height_mm=map_height_mm,
-    )
-    current_ratio = max(width_ratio, height_ratio)
-    if current_ratio <= 0:
-        return int(round(clamped_base))
+    """유적 bbox와 목표 점유율로부터 축척을 직접 계산한다.
 
-    adjusted = clamped_base * (current_ratio / target_ratio)
-    clamped_adjusted = clamp(adjusted, minimum_scale, maximum_scale)
+    계산 공식:
+        ideal_scale = feature_size_m * 1000 / (map_size_mm * target_ratio)
+
+    가로·세로 중 더 큰 쪽을 기준으로 하여 유적이 도면을 초과하지 않게 한다.
+    """
+    if map_width_mm <= 0 or map_height_mm <= 0 or target_ratio <= 0:
+        return int(minimum_scale)
+    if feature_width_m <= 0 or feature_height_m <= 0:
+        return int(minimum_scale)
+
+    # 가로·세로 각각의 이상적 축척을 계산하고 큰 쪽을 선택
+    scale_w = (feature_width_m * 1000.0) / (map_width_mm * target_ratio)
+    scale_h = (feature_height_m * 1000.0) / (map_height_mm * target_ratio)
+    ideal = max(scale_w, scale_h)
+
+    clamped = clamp(ideal, minimum_scale, maximum_scale)
     if use_standard_scales:
-        return round_to_standard_scale(clamped_adjusted, STANDARD_SCALES)
-    return int(round(clamped_adjusted))
+        return round_to_standard_scale(clamped, STANDARD_SCALES)
+    return int(round(clamped))
 
 
 def occupancy_status(occupancy_ratio: float) -> str:
