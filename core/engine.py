@@ -342,6 +342,7 @@ class ArchAutoMapEngine:
             map_height_mm=map_height_mm,
             target_ratio=config.target_occupancy_ratio,
             use_standard_scales=config.use_standard_scales,
+            min_context_buffer_m=config.min_context_buffer_m,
         )
         width_ratio, height_ratio = occupancy_ratios(
             feature_width_m=bbox.width(),

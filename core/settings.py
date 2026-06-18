@@ -7,6 +7,7 @@ from qgis.PyQt.QtCore import QSettings
 from .constants import (
     DEFAULT_DPI,
     DEFAULT_FILL_COLOR_HEX,
+    DEFAULT_MIN_CONTEXT_BUFFER_M,
     DEFAULT_OUTPUT_CRS_AUTHID,
     DEFAULT_OUTLINE_COLOR_HEX,
     DEFAULT_OUTLINE_WIDTH_MM,
@@ -38,6 +39,7 @@ class SettingsKey:
     OUTPUT_DIR = "output_dir"
     DPI = "dpi"
     TARGET_OCCUPANCY_RATIO = "target_occupancy_ratio"
+    MIN_CONTEXT_BUFFER_M = "min_context_buffer_m"
     USE_STANDARD_SCALES = "use_standard_scales"
 
 
@@ -49,6 +51,7 @@ SETTINGS_DEFAULTS = {
     SettingsKey.OUTPUT_MODE: OUTPUT_MODE_FINAL_ONLY,
     SettingsKey.DPI: DEFAULT_DPI,
     SettingsKey.TARGET_OCCUPANCY_RATIO: DEFAULT_TARGET_OCCUPANCY_RATIO,
+    SettingsKey.MIN_CONTEXT_BUFFER_M: DEFAULT_MIN_CONTEXT_BUFFER_M,
     SettingsKey.USE_STANDARD_SCALES: True,
     SettingsKey.STYLE_ATTRIBUTE_RULES: [],
 }

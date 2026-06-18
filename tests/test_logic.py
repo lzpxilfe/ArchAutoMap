@@ -9,25 +9,14 @@ from core.logic import (
     resolve_fill_color,
     round_to_standard_scale,
     sanitize_filename,
-    scale_from_area,
     unique_output_path,
 )
 
 
 class LogicTests(unittest.TestCase):
-    def test_scale_from_area_uses_rule_table(self):
-        self.assertEqual(scale_from_area(10000), 9000)
-        self.assertEqual(scale_from_area(50000), 11000)
-        self.assertEqual(scale_from_area(140000), 13000)
-        self.assertEqual(scale_from_area(205000), 16000)
-        self.assertEqual(scale_from_area(230000), 18000)
-        self.assertEqual(scale_from_area(390000), 20000)
-        self.assertEqual(scale_from_area(500000), 24000)
-
     def test_adjusted_scale_respects_target_ratio_and_clamp(self):
         # With standard scales disabled
         scale_raw = adjusted_scale_from_bbox(
-            base_scale=16000,
             feature_width_m=320,
             feature_height_m=140,
             map_width_mm=105,
@@ -38,7 +27,6 @@ class LogicTests(unittest.TestCase):
 
         # With standard scales enabled (rounds 5079 up to 6000)
         scale_std = adjusted_scale_from_bbox(
-            base_scale=16000,
             feature_width_m=320,
             feature_height_m=140,
             map_width_mm=105,
@@ -49,25 +37,49 @@ class LogicTests(unittest.TestCase):
 
         # Tiny scale without standard scales
         tiny_scale_raw = adjusted_scale_from_bbox(
-            base_scale=9000,
             feature_width_m=40,
             feature_height_m=20,
             map_width_mm=105,
             map_height_mm=80,
             use_standard_scales=False,
         )
-        self.assertEqual(tiny_scale_raw, 3000)
+        self.assertEqual(tiny_scale_raw, 635)
 
-        # Tiny scale with standard scales (3000 is already a standard scale)
+        # Tiny scale with standard scales (rounds 635 up to 1000)
         tiny_scale_std = adjusted_scale_from_bbox(
-            base_scale=9000,
             feature_width_m=40,
             feature_height_m=20,
             map_width_mm=105,
             map_height_mm=80,
             use_standard_scales=True,
         )
-        self.assertEqual(tiny_scale_std, 3000)
+        self.assertEqual(tiny_scale_std, 1000)
+
+    def test_adjusted_scale_respects_min_context_buffer(self):
+        # min_context_buffer_m = 500m
+        # buffered width = 40 + 1000 = 1040m -> scale_w = 1040 * 1000 / 105 = 9904.76
+        # buffered height = 20 + 1000 = 1020m -> scale_h = 1020 * 1000 / 80 = 12750
+        # ideal scale = 12750
+        scale_raw_buffered = adjusted_scale_from_bbox(
+            feature_width_m=40,
+            feature_height_m=20,
+            map_width_mm=105,
+            map_height_mm=80,
+            use_standard_scales=False,
+            min_context_buffer_m=500.0,
+        )
+        self.assertEqual(scale_raw_buffered, 12750)
+
+        # With standard scales enabled, 12750 rounds up to 15000
+        scale_std_buffered = adjusted_scale_from_bbox(
+            feature_width_m=40,
+            feature_height_m=20,
+            map_width_mm=105,
+            map_height_mm=80,
+            use_standard_scales=True,
+            min_context_buffer_m=500.0,
+        )
+        self.assertEqual(scale_std_buffered, 15000)
 
     def test_round_to_standard_scale(self):
         # standard_scales = (500, 600, 1000, 1200, 1500, 2000, 2500, 3000, 5000, 6000, 10000, 12000, 15000, 20000, 25000, 50000)

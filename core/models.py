@@ -6,6 +6,7 @@ from .constants import (
     AUTO_LAYOUT_HEIGHT_MM,
     AUTO_LAYOUT_WIDTH_MM,
     DEFAULT_DPI,
+    DEFAULT_MIN_CONTEXT_BUFFER_M,
     DEFAULT_PREVIEW_DPI,
     OUTPUT_MODE_FINAL_ONLY,
 )
@@ -52,6 +53,7 @@ class ExportConfig:
     preview_dpi: int = DEFAULT_PREVIEW_DPI
     target_occupancy_ratio: float = 0.60
     use_standard_scales: bool = True
+    min_context_buffer_m: float = DEFAULT_MIN_CONTEXT_BUFFER_M
 
 
 @dataclass(frozen=True)

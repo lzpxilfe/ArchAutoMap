@@ -46,6 +46,7 @@ from .core.constants import (
     COLOR_DIALOG_TITLE,
     DEFAULT_DPI,
     DEFAULT_FILL_COLOR_HEX,
+    DEFAULT_MIN_CONTEXT_BUFFER_M,
     DEFAULT_OUTPUT_CRS_AUTHID,
     DEFAULT_OUTLINE_COLOR_HEX,
     DEFAULT_OUTLINE_WIDTH_MM,
@@ -58,6 +59,7 @@ from .core.constants import (
     FEATURE_SEARCH_INPUT_PLACEHOLDER,
     FEATURE_SEARCH_PLACEHOLDER,
     FEATURE_SELECT_PLACEHOLDER,
+    MAX_CONTEXT_BUFFER_M,
     GEOMETRY_AREA_LABEL,
     MAX_DPI,
     MAX_OUTLINE_WIDTH_MM,
@@ -437,6 +439,16 @@ class ArchAutoMapDockWidget(QDockWidget):
             "도면 내에서 유적이 차지하는 최대 비율입니다. 값을 낮출수록 주변 지형 맥락이 더 많이 포함됩니다 (기본값: 60%)."
         )
 
+        self.min_context_buffer_spin = QSpinBox()
+        self.min_context_buffer_spin.setRange(0, MAX_CONTEXT_BUFFER_M)
+        self.min_context_buffer_spin.setSingleStep(50)
+        self.min_context_buffer_spin.setValue(DEFAULT_MIN_CONTEXT_BUFFER_M)
+        self.min_context_buffer_spin.setSuffix(" m")
+        self.min_context_buffer_spin.setToolTip(
+            "유적 외곽선으로부터 확보해야 할 최소 주변 지형 공간(m)입니다.\n"
+            "점유율이 높더라도 이 공간을 강제로 확보하여 주변 맥락을 표현합니다 (0 = 사용 안 함)."
+        )
+
         self.use_standard_scales_checkbox = QCheckBox("정규 축척 사용")
         self.use_standard_scales_checkbox.setChecked(True)
         self.use_standard_scales_checkbox.setToolTip(
@@ -480,6 +492,7 @@ class ArchAutoMapDockWidget(QDockWidget):
             ("유적명 필드", self.name_field_combo, False),
             ("면적 필드", self.area_field_combo, False),
             ("도면 내 유적 점유율", occupancy_container, False),
+            ("최소 지형 맥락 거리", self.min_context_buffer_spin, False),
             ("출력 CRS", self.output_crs_edit, False),
             ("Layout 모드", self.layout_mode_combo, False),
             ("Layout 이름", self.layout_name_combo, False),
@@ -704,6 +717,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.dpi_spin.valueChanged.connect(self._persist_state)
         self.outline_width_spin.valueChanged.connect(self._persist_state)
         self.target_occupancy_spin.valueChanged.connect(self._persist_state)
+        self.min_context_buffer_spin.valueChanged.connect(self._persist_state)
         self.use_standard_scales_checkbox.toggled.connect(self._persist_state)
         self.style_group.toggled.connect(self._on_style_group_toggled)
         self.attribute_style_checkbox.toggled.connect(self._on_attribute_style_toggled)
@@ -1111,6 +1125,7 @@ class ArchAutoMapDockWidget(QDockWidget):
             output_mode=self.output_mode_combo.currentData(),
             output_dir=output_dir,
             target_occupancy_ratio=self.target_occupancy_spin.value() / 100.0,
+            min_context_buffer_m=self.min_context_buffer_spin.value(),
             use_standard_scales=self.use_standard_scales_checkbox.isChecked(),
         )
 
@@ -1138,6 +1153,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.settings.set(SettingsKey.OUTPUT_DIR, self.output_dir_edit.text().strip())
         self.settings.set(SettingsKey.DPI, self.dpi_spin.value())
         self.settings.set(SettingsKey.TARGET_OCCUPANCY_RATIO, self.target_occupancy_spin.value())
+        self.settings.set(SettingsKey.MIN_CONTEXT_BUFFER_M, self.min_context_buffer_spin.value())
         self.settings.set(SettingsKey.USE_STANDARD_SCALES, self.use_standard_scales_checkbox.isChecked())
 
     def _load_state(self):
@@ -1162,6 +1178,9 @@ class ArchAutoMapDockWidget(QDockWidget):
             self.target_occupancy_spin.setValue(int(val))
         else:
             self.target_occupancy_spin.setValue(int(DEFAULT_TARGET_OCCUPANCY_RATIO * 100))
+
+        min_buf = self.settings.get_int(SettingsKey.MIN_CONTEXT_BUFFER_M, DEFAULT_MIN_CONTEXT_BUFFER_M)
+        self.min_context_buffer_spin.setValue(min_buf)
 
         self.use_standard_scales_checkbox.setChecked(
             self.settings.get_bool(SettingsKey.USE_STANDARD_SCALES, True)

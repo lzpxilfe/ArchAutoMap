@@ -61,11 +61,16 @@ def adjusted_scale_from_bbox(
     minimum_scale: float = MIN_EXPORT_SCALE,
     maximum_scale: float = MAX_EXPORT_SCALE,
     use_standard_scales: bool = True,
+    min_context_buffer_m: float = 0.0,
 ) -> int:
     """유적 bbox와 목표 점유율로부터 축척을 직접 계산한다.
 
-    계산 공식:
+    계산 공식 (점유율 기준):
         ideal_scale = feature_size_m * 1000 / (map_size_mm * target_ratio)
+
+    min_context_buffer_m > 0 이면, 유적 bbox 외곽으로 최소 해당 거리만큼의
+    지형 맥락이 도면에 담기도록 하는 축척도 함께 계산하여
+    두 값 중 더 넓은(큰) 쪽을 채택한다.
 
     가로·세로 중 더 큰 쪽을 기준으로 하여 유적이 도면을 초과하지 않게 한다.
     """
@@ -74,10 +79,21 @@ def adjusted_scale_from_bbox(
     if feature_width_m <= 0 or feature_height_m <= 0:
         return int(minimum_scale)
 
-    # 가로·세로 각각의 이상적 축척을 계산하고 큰 쪽을 선택
+    # ── 점유율 기준 축척 ────────────────────────────────────────────
     scale_w = (feature_width_m * 1000.0) / (map_width_mm * target_ratio)
     scale_h = (feature_height_m * 1000.0) / (map_height_mm * target_ratio)
     ideal = max(scale_w, scale_h)
+
+    # ── 최소 지형 맥락 거리 기준 축척 ─────────────────────────────
+    # 유적 bbox 주위로 min_context_buffer_m 미터가 도면에 포함되도록
+    # 필요한 최소 축척을 계산한다. (target_ratio 무관, 단순 범위 보장)
+    if min_context_buffer_m > 0:
+        buffered_w = feature_width_m + 2.0 * min_context_buffer_m
+        buffered_h = feature_height_m + 2.0 * min_context_buffer_m
+        buffer_scale_w = (buffered_w * 1000.0) / map_width_mm
+        buffer_scale_h = (buffered_h * 1000.0) / map_height_mm
+        buffer_scale = max(buffer_scale_w, buffer_scale_h)
+        ideal = max(ideal, buffer_scale)
 
     clamped = clamp(ideal, minimum_scale, maximum_scale)
     if use_standard_scales:
