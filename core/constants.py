@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import configparser
+import os
 from dataclasses import dataclass
 
+
+def _read_plugin_version() -> str:
+    """metadata.txt 에서 버전 문자열을 읽는다. 실패 시 '?'를 반환한다."""
+    metadata_path = os.path.join(os.path.dirname(__file__), "..", "metadata.txt")
+    try:
+        parser = configparser.ConfigParser()
+        parser.read(metadata_path, encoding="utf-8")
+        return parser.get("general", "version", fallback="?")
+    except Exception:  # pylint: disable=broad-except
+        return "?"
+
 PLUGIN_NAME = "ArchAutoMap"
+PLUGIN_VERSION = _read_plugin_version()
 ICON_FILENAME = "icon.png"
 ACTION_OBJECT_NAME = "ArchAutoMapAction"
 TOOLBAR_OBJECT_NAME = "ArchAutoMapToolbar"
@@ -54,6 +68,20 @@ POLYGON_GEOMETRY_NAME = "Polygon"
 MULTI_POLYGON_GEOMETRY_NAME = "MultiPolygon"
 TRANSPARENT_FILL_COLOR = "0,0,0,0"
 SYMBOL_SIZE_UNIT_MM = "MM"
+
+# 임시 레이어 이름 접두사
+TEMP_FILL_LAYER_PREFIX = "ArchAutoMap Fill "
+TEMP_OUTLINE_LAYER_PREFIX = "ArchAutoMap Outline "
+
+# 미리보기 임시 파일 접두사
+PREVIEW_TEMP_FILE_PREFIX = "archautomap_preview_"
+
+# 외곽선 레이어 잠금 버튼 툴팁
+OUTLINE_LOCK_TOOLTIP = "잠금 해제 — 외곽선 레이어를 변경할 수 있습니다"
+OUTLINE_UNLOCK_TOOLTIP = "잠금 활성 — 클릭 시 다시 잠글 수 있습니다"
+
+# 검색창 플레이스홀더
+FEATURE_SEARCH_INPUT_PLACEHOLDER = "🔍  유적명 검색 (2글자 이상)"
 
 COLOR_BUTTON_TEXT_LIGHT = "#F0F4FF"
 COLOR_BUTTON_TEXT_DARK = "#0D1117"

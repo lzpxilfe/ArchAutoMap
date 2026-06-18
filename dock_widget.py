@@ -55,6 +55,7 @@ from .core.constants import (
     DOCK_WIDGET_OBJECT_NAME,
     EXISTING_LAYOUT_MODE,
     FEATURE_NO_RESULTS_PLACEHOLDER,
+    FEATURE_SEARCH_INPUT_PLACEHOLDER,
     FEATURE_SEARCH_PLACEHOLDER,
     FEATURE_SELECT_PLACEHOLDER,
     GEOMETRY_AREA_LABEL,
@@ -64,12 +65,15 @@ from .core.constants import (
     MIN_FEATURE_SEARCH_CHARS,
     MIN_OUTLINE_WIDTH_MM,
     OCCUPANCY_DIAGRAM_STYLE,
+    OUTLINE_LOCK_TOOLTIP,
+    OUTLINE_UNLOCK_TOOLTIP,
     OUTLINE_WIDTH_STEP_MM,
     OUTLINE_WIDTH_SUFFIX,
     OUTPUT_DIRECTORY_DIALOG_TITLE,
     OUTPUT_MODE_FINAL_ONLY,
     OUTPUT_MODE_PAIRED,
     PLUGIN_NAME,
+    PLUGIN_VERSION,
     SEARCH_DEBOUNCE_MS,
 )
 from .core.engine import ArchAutoMapEngine
@@ -195,12 +199,6 @@ class AttributeRuleRow(QFrame):
             )
         )
 
-
-class _SectionLabel(QLabel):
-    """그룹 내 소제목 레이블"""
-    def __init__(self, text: str, parent=None):
-        super().__init__(text, parent)
-        self.setObjectName("SectionCaption")
 
 
 class CollapsibleSection(QWidget):
@@ -380,7 +378,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         title = QLabel(PLUGIN_NAME)
         title.setObjectName("HeroTitle")
 
-        ver = QLabel("v0.1.2")
+        ver = QLabel(f"v{PLUGIN_VERSION}")
         ver.setStyleSheet(
             f"color: {DOCK_PALETTE.text_soft}; font-size: 10px; "
             f"background: {DOCK_PALETTE.surface}; border-radius: 4px; "
@@ -393,7 +391,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         title_row.addStretch()
         title_row.addWidget(ver)
 
-        subtitle = QLabel("유적 1건만 골라 원본 심볼 그대로 JPG 도면으로 빠르게 출력합니다.")
+        subtitle = QLabel("유적 폴리곤을 자동으로 중앙 배치하고 JPG 도면으로 단건·일괄 출력합니다.")
         subtitle.setObjectName("HeroSubtitle")
         subtitle.setWordWrap(True)
 
@@ -419,7 +417,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.outline_lock_btn.setObjectName("NeutralButton")
         self.outline_lock_btn.setFixedWidth(30)
         self.outline_lock_btn.setFixedHeight(28)
-        self.outline_lock_btn.setToolTip("잠금 해제 — 외곽선 레이어를 변경할 수 있습니다")
+        self.outline_lock_btn.setToolTip(OUTLINE_LOCK_TOOLTIP)
         self.outline_lock_btn.clicked.connect(self._toggle_outline_lock)
 
         self.fill_layer_combo = QgsMapLayerComboBox()
@@ -464,10 +462,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.refresh_layouts_button.setFixedWidth(90)
 
         def _lbl(text, important=False):
-            l = QLabel(text)
-            color = DOCK_PALETTE.title if important else DOCK_PALETTE.text_soft
-            l.setStyleSheet(f"color: {color}; font-size: 11px;{'font-weight:700;' if important else ''}")
-            return l
+            return _make_label(text, important)
 
         # 외곽선 레이어 행: 콤보박스 + 잠금 버튼
         outline_row = QHBoxLayout()
@@ -506,9 +501,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.outline_layer_combo.setEnabled(not self._outline_locked)
         self.outline_lock_btn.setText("🔒" if self._outline_locked else "🔓")
         self.outline_lock_btn.setToolTip(
-            "잠금 해제 — 외곽선 레이어를 변경할 수 있습니다"
-            if self._outline_locked else
-            "잠금 활성 — 클릭 시 다시 잠깔 수 있습니다"
+            OUTLINE_LOCK_TOOLTIP if self._outline_locked else OUTLINE_UNLOCK_TOOLTIP
         )
 
     def _build_style_group(self):
@@ -576,7 +569,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
         self.feature_search_edit = QLineEdit()
-        self.feature_search_edit.setPlaceholderText("🔍  유적명 검색 (2글자 이상)")
+        self.feature_search_edit.setPlaceholderText(FEATURE_SEARCH_INPUT_PLACEHOLDER)
         self.feature_combo = QComboBox()
         self.feature_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         search_row.addWidget(self.feature_search_edit, 2)
@@ -651,9 +644,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.progress_label.setAlignment(Qt.AlignCenter)
 
         def _lbl(text):
-            l = QLabel(text)
-            l.setStyleSheet(f"color: {DOCK_PALETTE.text_soft}; font-size: 11px;")
-            return l
+            return _make_label(text)
 
         layout.addWidget(_lbl("출력 방식"), 0, 0, Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.output_mode_combo, 0, 1, 1, 2)
@@ -1240,7 +1231,20 @@ class ArchAutoMapDockWidget(QDockWidget):
         self._preview_pixmap = None
 
 
+def _make_label(text: str, important: bool = False, parent=None) -> QLabel:
+    """소제목·레이블 헬퍼. important=True 이면 title 색상과 굵은 글씨를 사용한다."""
+    label = QLabel(text, parent)
+    if important:
+        label.setStyleSheet(
+            f"color: {DOCK_PALETTE.title}; font-size: 11px; font-weight: 700;"
+        )
+    else:
+        label.setStyleSheet(f"color: {DOCK_PALETTE.text_soft}; font-size: 11px;")
+    return label
+
+
 def _SectionLabel(text: str, parent=None) -> QLabel:  # noqa: N802
+    """그룹 내 소제목 레이블 (SectionCaption objectName 적용)."""
     label = QLabel(text, parent)
     label.setObjectName("SectionCaption")
     return label

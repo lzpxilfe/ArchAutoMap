@@ -31,8 +31,12 @@ from .constants import (
     MEMORY_LAYER_PROVIDER,
     MIN_FEATURE_SEARCH_CHARS,
     MULTI_POLYGON_GEOMETRY_NAME,
+    OUTPUT_MODE_PAIRED,
     POLYGON_GEOMETRY_NAME,
+    PREVIEW_TEMP_FILE_PREFIX,
     SYMBOL_SIZE_UNIT_MM,
+    TEMP_FILL_LAYER_PREFIX,
+    TEMP_OUTLINE_LAYER_PREFIX,
     TRANSPARENT_FILL_COLOR,
 )
 from .logic import (
@@ -204,7 +208,7 @@ class ArchAutoMapEngine:
         prepared = self._prepare_render(config, feature, outline_lookup)
 
         image_file = tempfile.NamedTemporaryFile(
-            prefix="archautomap_preview_",
+            prefix=PREVIEW_TEMP_FILE_PREFIX,
             suffix=".jpg",
             delete=False,
         )
@@ -279,7 +283,7 @@ class ArchAutoMapEngine:
         output_paths: list[str] = []
         try:
             stem = sanitize_filename(prepared.name)
-            if config.output_mode == "paired":
+            if config.output_mode == OUTPUT_MODE_PAIRED:
                 base_path = unique_output_path(config.output_dir, f"{stem}-1", ".jpg", used_paths)
                 overlay_path = unique_output_path(
                     config.output_dir,
@@ -379,6 +383,9 @@ class ArchAutoMapEngine:
                     output_crs=output_crs,
                     name=raw_name,
                     config=config,
+                    # style.enabled 이면 설정 스타일 적용.
+                    # 외곽선 피처 미발견 시에도 fill geometry를 폴리곤으로 그리지 않도록
+                    # style override(투명 채움 + 외곽선만)를 강제한다.
                     use_style_override=(config.style.enabled or outline_feature is None),
                 )
             )
@@ -677,8 +684,8 @@ class ArchAutoMapEngine:
         if hasattr(map_item, "setKeepLayerSet"):
             map_item.setKeepLayerSet(True)
 
-        layers = list(reversed(overlay_layers)) + [base_layer]
-        map_item.setLayers(layers)
+        # 레이어 순서는 _render_base_only / _render_with_overlay 에서 결정한다.
+        # 여기서는 CRS·범위·축척만 설정한다.
         map_item.setCrs(output_crs)
         map_item.setExtent(extent)
         map_item.setScale(scale)
@@ -727,7 +734,7 @@ class ArchAutoMapEngine:
             source_feature=source_feature,
             geometry=geometry,
             output_crs=output_crs,
-            name=f"ArchAutoMap Fill {name}",
+            name=f"{TEMP_FILL_LAYER_PREFIX}{name}",
         )
         if config.style.enabled:
             symbol_props = {
@@ -758,7 +765,7 @@ class ArchAutoMapEngine:
             source_feature=source_feature,
             geometry=geometry,
             output_crs=output_crs,
-            name=f"ArchAutoMap Outline {name}",
+            name=f"{TEMP_OUTLINE_LAYER_PREFIX}{name}",
         )
         if use_style_override:
             layer.renderer().setSymbol(
@@ -818,5 +825,6 @@ class ArchAutoMapEngine:
         settings = QgsLayoutExporter.ImageExportSettings()
         settings.dpi = dpi
         result = exporter.exportToImage(path, settings)
-        if result not in (0, getattr(QgsLayoutExporter, "Success", 0)) or not os.path.exists(path):
+        # QgsLayoutExporter.Success == 0; 파일 존재 여부도 함께 확인한다.
+        if result != 0 or not os.path.exists(path):
             raise ArchAutoMapError(f"이미지 내보내기에 실패했습니다: {path}")
