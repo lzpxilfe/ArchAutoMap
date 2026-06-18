@@ -1,4 +1,4 @@
-"""
+r"""
 ArchAutoMap QGIS 플러그인 강제 리로드 스크립트
 QGIS Python Console에서 실행:
     exec(open(r"C:\Users\nuri9\Documents\archautomap\dev_reload.py").read())
