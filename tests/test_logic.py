@@ -56,28 +56,28 @@ class LogicTests(unittest.TestCase):
         self.assertEqual(tiny_scale_std, 1000)
 
     def test_adjusted_scale_respects_min_context_buffer(self):
-        # min_context_buffer_m = 500m
-        # buffered width = 40 + 1000 = 1040m -> scale_w = 1040 * 1000 / 105 = 9904.76
-        # buffered height = 20 + 1000 = 1020m -> scale_h = 1020 * 1000 / 80 = 12750
-        # ideal scale = 12750
+        # min_context_buffer_m = 1000m (minimum map extent is 1000m)
+        # buffer_scale_w = 1000 * 1000 / 105 = 9523.8
+        # buffer_scale_h = 1000 * 1000 / 80 = 12500
+        # ideal scale = 12500
         scale_raw_buffered = adjusted_scale_from_bbox(
             feature_width_m=40,
             feature_height_m=20,
             map_width_mm=105,
             map_height_mm=80,
             use_standard_scales=False,
-            min_context_buffer_m=500.0,
+            min_context_buffer_m=1000.0,
         )
-        self.assertEqual(scale_raw_buffered, 12750)
+        self.assertEqual(scale_raw_buffered, 12500)
 
-        # With standard scales enabled, 12750 rounds up to 15000
+        # With standard scales enabled, 12500 rounds up to 15000
         scale_std_buffered = adjusted_scale_from_bbox(
             feature_width_m=40,
             feature_height_m=20,
             map_width_mm=105,
             map_height_mm=80,
             use_standard_scales=True,
-            min_context_buffer_m=500.0,
+            min_context_buffer_m=1000.0,
         )
         self.assertEqual(scale_std_buffered, 15000)
 

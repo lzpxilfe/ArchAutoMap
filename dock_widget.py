@@ -445,8 +445,8 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.min_context_buffer_spin.setValue(DEFAULT_MIN_CONTEXT_BUFFER_M)
         self.min_context_buffer_spin.setSuffix(" m")
         self.min_context_buffer_spin.setToolTip(
-            "유적 외곽선으로부터 확보해야 할 최소 주변 지형 공간(m)입니다.\n"
-            "점유율이 높더라도 이 공간을 강제로 확보하여 주변 맥락을 표현합니다 (0 = 사용 안 함)."
+            "지도가 표현할 지상 영역의 최소 범위(m)입니다.\n"
+            "유적이 작아 과도하게 줌인되는 것을 방지하고 최소한 이 거리의 지형을 보장합니다 (0 = 사용 안 함)."
         )
 
         self.use_standard_scales_checkbox = QCheckBox("정규 축척 사용")
