@@ -38,6 +38,14 @@ class LayoutConfig:
 
 
 @dataclass(frozen=True)
+class BeforeLayerConfig:
+    """이전 시기 레이어 설정 — Before 도면에 표시할 레이어 1개를 나타낸다."""
+
+    layer_id: str    # QGIS 레이어 ID
+    name_field: str  # before 레이어 내에서 유적명을 담은 속성 필드명
+
+
+@dataclass(frozen=True)
 class ExportConfig:
     base_layer_id: str
     fill_layer_id: str
@@ -54,6 +62,7 @@ class ExportConfig:
     target_occupancy_ratio: float = 0.60
     use_standard_scales: bool = True
     min_context_buffer_m: float = DEFAULT_MIN_CONTEXT_BUFFER_M
+    before_layer_configs: tuple[BeforeLayerConfig, ...] = ()
 
 
 @dataclass(frozen=True)

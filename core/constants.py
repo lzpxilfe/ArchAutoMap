@@ -74,6 +74,10 @@ SYMBOL_SIZE_UNIT_MM = "MM"
 # 임시 레이어 이름 접두사
 TEMP_FILL_LAYER_PREFIX = "ArchAutoMap Fill "
 TEMP_OUTLINE_LAYER_PREFIX = "ArchAutoMap Outline "
+TEMP_BEFORE_LAYER_PREFIX = "ArchAutoMap Before "
+
+# Before 레이어 (이전 시기 도면) 관련
+MAX_BEFORE_LAYERS = 5
 
 # 미리보기 임시 파일 접두사
 PREVIEW_TEMP_FILE_PREFIX = "archautomap_preview_"

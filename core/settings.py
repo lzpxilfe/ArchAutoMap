@@ -41,6 +41,7 @@ class SettingsKey:
     TARGET_OCCUPANCY_RATIO = "target_occupancy_ratio"
     MIN_CONTEXT_BUFFER_M = "min_context_buffer_m"
     USE_STANDARD_SCALES = "use_standard_scales"
+    BEFORE_LAYER_CONFIGS = "before_layer_configs"
 
 
 SETTINGS_DEFAULTS = {
@@ -54,6 +55,7 @@ SETTINGS_DEFAULTS = {
     SettingsKey.MIN_CONTEXT_BUFFER_M: DEFAULT_MIN_CONTEXT_BUFFER_M,
     SettingsKey.USE_STANDARD_SCALES: True,
     SettingsKey.STYLE_ATTRIBUTE_RULES: [],
+    SettingsKey.BEFORE_LAYER_CONFIGS: [],
 }
 
 

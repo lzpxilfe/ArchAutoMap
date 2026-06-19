@@ -35,6 +35,7 @@ from .constants import (
     POLYGON_GEOMETRY_NAME,
     PREVIEW_TEMP_FILE_PREFIX,
     SYMBOL_SIZE_UNIT_MM,
+    TEMP_BEFORE_LAYER_PREFIX,
     TEMP_FILL_LAYER_PREFIX,
     TEMP_OUTLINE_LAYER_PREFIX,
     TRANSPARENT_FILL_COLOR,
@@ -49,6 +50,7 @@ from .logic import (
     unique_output_path,
 )
 from .models import (
+    BeforeLayerConfig,
     ExportConfig,
     ExportSummary,
     FeatureChoice,
@@ -284,20 +286,32 @@ class ArchAutoMapEngine:
         try:
             stem = sanitize_filename(prepared.name)
             if config.output_mode == OUTPUT_MODE_PAIRED:
-                base_path = unique_output_path(config.output_dir, f"{stem}-1", ".jpg", used_paths)
-                overlay_path = unique_output_path(
+                before_path = unique_output_path(config.output_dir, f"{stem}-1", ".jpg", used_paths)
+                after_path = unique_output_path(
                     config.output_dir,
                     f"{stem}-2",
                     ".jpg",
                     used_paths,
                 )
-                self._render_base_only(prepared)
-                self._export_layout_image(prepared.layout, base_path, config.dpi)
-                output_paths.append(base_path)
+                # Before 도면: before 레이어가 있으면 이름 매칭으로 이전 경계 표시,
+                # 없으면 기존처럼 배경만 출력
+                before_temp_ids = self._render_before(
+                    prepared=prepared,
+                    config=config,
+                    feature_name=prepared.name,
+                    output_crs=self._resolve_output_crs(config.output_crs_authid),
+                )
+                self._export_layout_image(prepared.layout, before_path, config.dpi)
+                output_paths.append(before_path)
+                # 임시 before 레이어 정리
+                for bid in before_temp_ids:
+                    if self.project.mapLayer(bid) is not None:
+                        self.project.removeMapLayer(bid)
 
+                # After 도면: 기존 overlay 렌더링
                 self._render_with_overlay(prepared)
-                self._export_layout_image(prepared.layout, overlay_path, config.dpi)
-                output_paths.append(overlay_path)
+                self._export_layout_image(prepared.layout, after_path, config.dpi)
+                output_paths.append(after_path)
             else:
                 final_path = unique_output_path(config.output_dir, stem, ".jpg", used_paths)
                 self._render_with_overlay(prepared)
@@ -433,6 +447,118 @@ class ArchAutoMapEngine:
         prepared.map_item.setLayers(layers)
         prepared.map_item.refresh()
         prepared.layout.refresh()
+
+    def _render_before(
+        self,
+        prepared: _PreparedRender,
+        config: ExportConfig,
+        feature_name: str,
+        output_crs: QgsCoordinateReferenceSystem,
+    ) -> list[str]:
+        """Before 도면을 렌더링한다.
+
+        before_layer_configs에 레이어가 있으면 이름 매칭으로 이전 경계를
+        외곽선 스타일로 오버레이하고, 없으면 배경만 표시한다.
+        반환값: 이번에 추가한 임시 before 레이어 ID 목록
+        """
+        before_temp_layers: list[QgsVectorLayer] = []
+
+        for before_cfg in config.before_layer_configs:
+            layer = self._create_temp_before_layer(
+                before_cfg=before_cfg,
+                feature_name=feature_name,
+                output_crs=output_crs,
+                config=config,
+            )
+            if layer is not None:
+                self.project.addMapLayer(layer, False)
+                before_temp_layers.append(layer)
+
+        if before_temp_layers:
+            # 순서: 위에서부터 최신 before → 오래된 before → base
+            layers = list(reversed(before_temp_layers)) + [prepared.base_layer]
+        else:
+            layers = [prepared.base_layer]
+
+        prepared.map_item.setLayers(layers)
+        prepared.map_item.refresh()
+        prepared.layout.refresh()
+
+        return [layer.id() for layer in before_temp_layers]
+
+    def _create_temp_before_layer(
+        self,
+        before_cfg: BeforeLayerConfig,
+        feature_name: str,
+        output_crs: QgsCoordinateReferenceSystem,
+        config: ExportConfig,
+    ) -> "QgsVectorLayer | None":
+        """Before 레이어에서 이름이 일치하는 피처를 찾아 임시 외곽선 레이어를 반환한다.
+
+        매칭 실패(0건 or 2건 이상) 시 None을 반환하고 로그만 남긴다.
+        """
+        try:
+            before_layer = self._require_vector_layer(before_cfg.layer_id, "이전 시기 레이어")
+        except ArchAutoMapError as exc:
+            self.log(f"[Before] 레이어 로드 실패: {exc}")
+            return None
+
+        if before_layer.fields().indexOf(before_cfg.name_field) < 0:
+            self.log(
+                f"[Before] '{before_layer.name()}'에 이름 필드 '{before_cfg.name_field}'가 없습니다. 건너뜁니다."
+            )
+            return None
+
+        # 이름 기반 매칭
+        request = QgsFeatureRequest().setFilterExpression(
+            QgsExpression.createFieldEqualityExpression(before_cfg.name_field, feature_name)
+        )
+        matched = []
+        fields = before_layer.fields()
+        for feat in before_layer.getFeatures(request):
+            safe = QgsFeature(fields)
+            safe.setGeometry(feat.geometry())
+            attrs = feat.attributes()
+            if len(attrs) >= fields.count():
+                safe.setAttributes(attrs[:fields.count()])
+            else:
+                safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
+            matched.append(safe)
+
+        if len(matched) == 0:
+            self.log(f"[Before] '{feature_name}' — '{before_layer.name()}'에서 매칭 피처 없음. 건너뜁니다.")
+            return None
+        if len(matched) > 1:
+            self.log(
+                f"[Before] '{feature_name}' — '{before_layer.name()}'에서 {len(matched)}개 중복 매칭. 첫 번째만 사용합니다."
+            )
+
+        source_feature = matched[0]
+        geometry = self._transform_geometry(source_feature.geometry(), before_layer.crs(), output_crs)
+        if geometry.isEmpty():
+            self.log(f"[Before] '{feature_name}' geometry가 비어 있습니다. 건너뜁니다.")
+            return None
+
+        # 외곽선만 그리는 임시 레이어 생성
+        layer = self._create_temp_feature_layer(
+            source_layer=before_layer,
+            source_feature=source_feature,
+            geometry=geometry,
+            output_crs=output_crs,
+            name=f"{TEMP_BEFORE_LAYER_PREFIX}{feature_name}",
+        )
+        # 스타일: 투명 채움 + 외곽선 (after의 outline 스타일 그대로)
+        layer.renderer().setSymbol(
+            QgsFillSymbol.createSimple(
+                {
+                    "color": TRANSPARENT_FILL_COLOR,
+                    "outline_color": config.style.outline_color_hex,
+                    "outline_width": str(config.style.outline_width_mm),
+                    "outline_width_unit": SYMBOL_SIZE_UNIT_MM,
+                }
+            )
+        )
+        return layer
 
     def _cleanup_render(self, prepared: _PreparedRender):
         for layer_id in prepared.temp_layer_ids:

@@ -59,6 +59,7 @@ from .core.constants import (
     FEATURE_SEARCH_INPUT_PLACEHOLDER,
     FEATURE_SEARCH_PLACEHOLDER,
     FEATURE_SELECT_PLACEHOLDER,
+    MAX_BEFORE_LAYERS,
     MAX_CONTEXT_BUFFER_M,
     GEOMETRY_AREA_LABEL,
     MAX_DPI,
@@ -79,7 +80,7 @@ from .core.constants import (
     SEARCH_DEBOUNCE_MS,
 )
 from .core.engine import ArchAutoMapEngine
-from .core.models import AttributeColorRule, ExportConfig, LayoutConfig, StyleConfig
+from .core.models import AttributeColorRule, BeforeLayerConfig, ExportConfig, LayoutConfig, StyleConfig
 from .core.settings import PluginSettings, SettingsKey
 
 
@@ -203,6 +204,84 @@ class AttributeRuleRow(QFrame):
 
 
 
+class BeforeLayerRow(QFrame):
+    """이전 시기 레이어 한 행 — 레이어 선택 + 이름 필드 선택 + 삭제 버튼."""
+
+    changed = pyqtSignal()
+    removed = pyqtSignal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("RuleRow")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+
+        # 레이어 선택
+        self.layer_combo = QgsMapLayerComboBox()
+        self.layer_combo.setFilters(QgsMapLayerProxyModel.VectorLayer)
+        self.layer_combo.setAllowEmptyLayer(True)
+        self.layer_combo.setToolTip("이전 시기 경계가 있는 벡터 레이어를 선택합니다.")
+
+        # 이름 필드 선택
+        self.field_combo = QComboBox()
+        self.field_combo.setToolTip("after 유적명과 매칭할 속성 필드명")
+        self.field_combo.setMinimumWidth(90)
+
+        self.remove_button = QPushButton("✕")
+        self.remove_button.setObjectName("NeutralButton")
+        self.remove_button.setFixedWidth(32)
+        self.remove_button.setToolTip("이 행 삭제")
+
+        layout.addWidget(self.layer_combo, 3)
+        layout.addWidget(self.field_combo, 2)
+        layout.addWidget(self.remove_button)
+
+        self.layer_combo.layerChanged.connect(self._on_layer_changed)
+        self.layer_combo.layerChanged.connect(self.changed.emit)
+        self.field_combo.currentIndexChanged.connect(self.changed.emit)
+        self.remove_button.clicked.connect(lambda: self.removed.emit(self))
+
+        self._on_layer_changed(self.layer_combo.currentLayer())
+
+    # ── 공개 인터페이스 ───────────────────────────────────────────
+
+    def to_config(self) -> "BeforeLayerConfig | None":
+        """현재 선택 상태를 BeforeLayerConfig로 변환. 미완성이면 None."""
+        layer = self.layer_combo.currentLayer()
+        if layer is None:
+            return None
+        name_field = self.field_combo.currentData() or self.field_combo.currentText().strip()
+        if not name_field:
+            return None
+        return BeforeLayerConfig(layer_id=layer.id(), name_field=name_field)
+
+    def restore(self, layer_id: str, name_field: str):
+        """저장된 설정을 UI에 복원한다."""
+        layer = QgsProject.instance().mapLayer(layer_id)
+        if layer is not None:
+            self.layer_combo.setLayer(layer)
+        self._on_layer_changed(self.layer_combo.currentLayer())
+        idx = self.field_combo.findData(name_field)
+        if idx >= 0:
+            self.field_combo.setCurrentIndex(idx)
+        else:
+            idx2 = self.field_combo.findText(name_field)
+            if idx2 >= 0:
+                self.field_combo.setCurrentIndex(idx2)
+
+    # ── 내부 ─────────────────────────────────────────────────────
+
+    def _on_layer_changed(self, layer):
+        self.field_combo.blockSignals(True)
+        self.field_combo.clear()
+        if layer is not None and hasattr(layer, "fields"):
+            for field in layer.fields():
+                self.field_combo.addItem(field.name(), field.name())
+        self.field_combo.blockSignals(False)
+
+
 class CollapsibleSection(QWidget):
     """접고 펼칠 수 있는 섹션 위젯.
 
@@ -295,6 +374,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         self._fill_color = QColor(DEFAULT_FILL_COLOR_HEX)
         self._outline_color = QColor(DEFAULT_OUTLINE_COLOR_HEX)
         self._style_rule_rows: list[AttributeRuleRow] = []
+        self._before_layer_rows: list[BeforeLayerRow] = []
         self._is_loading_state = True
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -356,6 +436,7 @@ class ArchAutoMapDockWidget(QDockWidget):
         root.addWidget(self._build_header_card())
         root.addWidget(self._build_input_group())
         root.addWidget(self._build_style_group())
+        root.addWidget(self._build_before_group())
         root.addWidget(self._build_preview_group())
         root.addWidget(self._build_export_group())
         root.addWidget(self._build_log_group())
@@ -572,6 +653,71 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.style_group.add_row("외곽선 두께", self.outline_width_spin)
         self.style_group.add_row("속성값별 채움색", rules_box)
         return self.style_group
+
+    def _build_before_group(self):
+        self.before_group = CollapsibleSection("이전 시기 레이어 (Before 도면 고급 설정)")
+
+        note = QLabel(
+            "Before 도면에 표시할 이전 시기 경계 레이어를 추가합니다.\n"
+            "After 유적명과 동일한 이름 속성으로 자동 매칭합니다."
+        )
+        note.setObjectName("HelpText")
+        note.setWordWrap(True)
+        self.before_group.add_full_row(note)
+
+        # 레이어 행 컨테이너
+        self.before_rows_container = QWidget()
+        self.before_rows_layout = QVBoxLayout(self.before_rows_container)
+        self.before_rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.before_rows_layout.setSpacing(4)
+        self.before_group.add_full_row(self.before_rows_container)
+
+        # 헤더: 레이어 | 이름 필드
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(6, 0, 6, 0)
+        header_layout.setSpacing(6)
+        lbl_layer = QLabel("레이어")
+        lbl_layer.setStyleSheet(f"color: {DOCK_PALETTE.text_soft}; font-size: 10px;")
+        lbl_field = QLabel("이름 필드")
+        lbl_field.setStyleSheet(f"color: {DOCK_PALETTE.text_soft}; font-size: 10px;")
+        header_layout.addWidget(lbl_layer, 3)
+        header_layout.addWidget(lbl_field, 2)
+        header_layout.addSpacing(38)  # 삭제 버튼 공간
+        self.before_rows_layout.addWidget(header)
+
+        # 레이어 추가 버튼
+        self.add_before_layer_button = QPushButton("+ 레이어 추가")
+        self.add_before_layer_button.setObjectName("NeutralButton")
+        self.add_before_layer_button.setToolTip(f"최대 {MAX_BEFORE_LAYERS}개 추가 가능")
+        self.before_group.add_full_row(self.add_before_layer_button)
+
+        self.add_before_layer_button.clicked.connect(self._add_before_layer_row)
+        self.before_group.toggled.connect(self._persist_state)
+
+        return self.before_group
+
+    def _add_before_layer_row(self, layer_id: str = "", name_field: str = "") -> BeforeLayerRow:
+        if len(self._before_layer_rows) >= MAX_BEFORE_LAYERS:
+            return None
+        row = BeforeLayerRow(parent=self.before_rows_container)
+        if layer_id:
+            row.restore(layer_id, name_field)
+        row.changed.connect(self._persist_state)
+        row.removed.connect(self._remove_before_layer_row)
+        self._before_layer_rows.append(row)
+        self.before_rows_layout.addWidget(row)
+        self.add_before_layer_button.setEnabled(len(self._before_layer_rows) < MAX_BEFORE_LAYERS)
+        self._persist_state()
+        return row
+
+    def _remove_before_layer_row(self, row: BeforeLayerRow):
+        if row in self._before_layer_rows:
+            self._before_layer_rows.remove(row)
+        self.before_rows_layout.removeWidget(row)
+        row.deleteLater()
+        self.add_before_layer_button.setEnabled(len(self._before_layer_rows) < MAX_BEFORE_LAYERS)
+        self._persist_state()
 
     def _build_preview_group(self):
         group = QGroupBox("미리보기")
@@ -1127,6 +1273,11 @@ class ArchAutoMapDockWidget(QDockWidget):
             target_occupancy_ratio=self.target_occupancy_spin.value() / 100.0,
             min_context_buffer_m=self.min_context_buffer_spin.value(),
             use_standard_scales=self.use_standard_scales_checkbox.isChecked(),
+            before_layer_configs=tuple(
+                cfg
+                for row in self._before_layer_rows
+                if (cfg := row.to_config()) is not None
+            ),
         )
 
     def _persist_state(self):
@@ -1155,6 +1306,14 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.settings.set(SettingsKey.TARGET_OCCUPANCY_RATIO, self.target_occupancy_spin.value())
         self.settings.set(SettingsKey.MIN_CONTEXT_BUFFER_M, self.min_context_buffer_spin.value())
         self.settings.set(SettingsKey.USE_STANDARD_SCALES, self.use_standard_scales_checkbox.isChecked())
+        self.settings.set_json(
+            SettingsKey.BEFORE_LAYER_CONFIGS,
+            [
+                {"layer_id": row.layer_combo.currentLayer().id(), "name_field": row.field_combo.currentData() or ""}
+                for row in self._before_layer_rows
+                if row.layer_combo.currentLayer() is not None
+            ],
+        )
 
     def _load_state(self):
         self._set_layer_if_present(self.base_layer_combo, self.settings.get(SettingsKey.BASE_LAYER_ID, ""))
@@ -1226,12 +1385,30 @@ class ArchAutoMapDockWidget(QDockWidget):
             )
             self._add_style_rule_row(value=value, fill_color_hex=fill_color_hex)
 
+        # Before 레이어 설정 복원
+        self._clear_before_layer_rows()
+        before_configs = self.settings.get_json(SettingsKey.BEFORE_LAYER_CONFIGS, []) or []
+        self.before_group.setChecked(bool(before_configs))
+        for bc in before_configs:
+            layer_id = str(bc.get("layer_id", "")).strip()
+            name_field = str(bc.get("name_field", "")).strip()
+            if layer_id:
+                self._add_before_layer_row(layer_id=layer_id, name_field=name_field)
+
     def _set_layer_if_present(self, combo: QgsMapLayerComboBox, layer_id: str):
         if not layer_id:
             return
         layer = self.project.mapLayer(layer_id)
         if layer is not None:
             combo.setLayer(layer)
+
+    def _clear_before_layer_rows(self):
+        for row in list(self._before_layer_rows):
+            self.before_rows_layout.removeWidget(row)
+            row.deleteLater()
+        self._before_layer_rows.clear()
+        if hasattr(self, "add_before_layer_button"):
+            self.add_before_layer_button.setEnabled(True)
 
     def log(self, message: str):
         self.log_edit.appendPlainText(message)
