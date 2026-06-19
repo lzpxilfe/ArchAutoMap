@@ -25,13 +25,10 @@ def reload_archautomap():
     else:
         print(f"  - 이미 언로드된 상태")
 
-    # 2. sys.modules 에서 ArchAutoMap 관련 모든 모듈 제거
+    # 2. sys.modules 에서 ArchAutoMap 관련 모든 모듈 제거 (부분 문자열 매칭으로 하위 모듈까지 완벽 제거)
     keys_to_remove = [
         k for k in sys.modules
-        if k == PLUGIN_NAME
-        or k.startswith(PLUGIN_NAME + ".")
-        or k == PLUGIN_NAME.lower()
-        or k.startswith(PLUGIN_NAME.lower() + ".")
+        if "archautomap" in k.lower()
     ]
     for k in keys_to_remove:
         del sys.modules[k]
