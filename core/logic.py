@@ -85,11 +85,13 @@ def adjusted_scale_from_bbox(
     ideal = max(scale_w, scale_h)
 
     # ── 최소 지형 맥락 거리 기준 축척 ─────────────────────────────
-    # 지도가 보여주는 실제 지상 크기(가로/세로) 자체가 최소한 min_context_buffer_m 미터 이상이 되도록 보장한다.
-    # 유적이 작아 과도하게 줌인되는 것을 방지하며, 유적이 이미 크면 이 조건은 자연스럽게 통과된다.
+    # 유적 경계선 바깥쪽으로 사방 최소 min_context_buffer_m 만큼의 맥락을 확보한다.
+    # 즉, 지도가 담아야 할 최소 지상 크기는 (유적 크기 + 2 * min_context_buffer_m) 이 된다.
     if min_context_buffer_m > 0:
-        buffer_scale_w = (min_context_buffer_m * 1000.0) / map_width_mm
-        buffer_scale_h = (min_context_buffer_m * 1000.0) / map_height_mm
+        required_w = feature_width_m + (2.0 * min_context_buffer_m)
+        required_h = feature_height_m + (2.0 * min_context_buffer_m)
+        buffer_scale_w = (required_w * 1000.0) / map_width_mm
+        buffer_scale_h = (required_h * 1000.0) / map_height_mm
         buffer_scale = max(buffer_scale_w, buffer_scale_h)
         ideal = max(ideal, buffer_scale)
 

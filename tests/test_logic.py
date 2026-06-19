@@ -56,10 +56,12 @@ class LogicTests(unittest.TestCase):
         self.assertEqual(tiny_scale_std, 1000)
 
     def test_adjusted_scale_respects_min_context_buffer(self):
-        # min_context_buffer_m = 1000m (minimum map extent is 1000m)
-        # buffer_scale_w = 1000 * 1000 / 105 = 9523.8
-        # buffer_scale_h = 1000 * 1000 / 80 = 12500
-        # ideal scale = 12500
+        # min_context_buffer_m = 1000m (사방 1000m 맥락 여백 확보)
+        # required_w = 40 + (2 * 1000) = 2040m
+        # required_h = 20 + (2 * 1000) = 2020m
+        # buffer_scale_w = 2040 * 1000 / 105 = 19428
+        # buffer_scale_h = 2020 * 1000 / 80 = 25250
+        # ideal scale = 25250
         scale_raw_buffered = adjusted_scale_from_bbox(
             feature_width_m=40,
             feature_height_m=20,
@@ -68,9 +70,9 @@ class LogicTests(unittest.TestCase):
             use_standard_scales=False,
             min_context_buffer_m=1000.0,
         )
-        self.assertEqual(scale_raw_buffered, 12500)
+        self.assertEqual(scale_raw_buffered, 25250)
 
-        # With standard scales enabled, 12500 rounds up to 15000
+        # With standard scales enabled, 25250 rounds up to 50000
         scale_std_buffered = adjusted_scale_from_bbox(
             feature_width_m=40,
             feature_height_m=20,
@@ -79,7 +81,7 @@ class LogicTests(unittest.TestCase):
             use_standard_scales=True,
             min_context_buffer_m=1000.0,
         )
-        self.assertEqual(scale_std_buffered, 15000)
+        self.assertEqual(scale_std_buffered, 50000)
 
     def test_round_to_standard_scale(self):
         # standard_scales = (500, 600, 1000, 1200, 1500, 2000, 2500, 3000, 5000, 6000, 10000, 12000, 15000, 20000, 25000, 50000)
