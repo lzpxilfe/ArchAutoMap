@@ -527,6 +527,35 @@ class ArchAutoMapEngine:
                 safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
             matched.append(safe)
 
+        # 이름 매칭된 결과가 2개 이상일 때, After 유적과의 공간 유사도(중첩 면적 순, 중심점 거리 순)로 정렬하여 최적 피처 선택
+        if len(matched) > 1:
+            try:
+                fill_layer = self._require_vector_layer(config.fill_layer_id, "유적 채움")
+                after_crs = fill_layer.crs()
+                before_crs = before_layer.crs()
+                raw_after_geom = feature.geometry()
+                if raw_after_geom and not raw_after_geom.isEmpty():
+                    after_geom_in_before = self._transform_geometry(raw_after_geom, after_crs, before_crs)
+                    if not after_geom_in_before.isEmpty():
+                        after_geom_valid = after_geom_in_before.makeValid()
+                        def sort_key(f):
+                            geom = f.geometry()
+                            if geom.isNull() or geom.isEmpty():
+                                return (0.0, float('inf'))
+                            geom_valid = geom.makeValid()
+                            intersection = geom_valid.intersection(after_geom_valid)
+                            intersect_area = intersection.area() if not intersection.isEmpty() else 0.0
+                            dist = geom_valid.centroid().distance(after_geom_valid.centroid())
+                            return (-intersect_area, dist)
+                        
+                        matched.sort(key=sort_key)
+                        self.log(
+                            f"[Before] '{feature_name}' 이름 중복 매칭 {len(matched)}건 발생. "
+                            f"After 유적과의 공간 유사도가 가장 높은 피처를 선택하여 매칭했습니다."
+                        )
+            except Exception as exc:
+                self.log(f"[Before] 이름 중복 매칭 정렬 중 오류 발생 (기본 순서 적용): {exc}")
+
         # 2. 이름 기반 매칭이 실패한 경우 공간적 겹침 매칭 시도 (70% 이상)
         if len(matched) == 0:
             try:
