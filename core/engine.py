@@ -300,6 +300,7 @@ class ArchAutoMapEngine:
                     prepared=prepared,
                     config=config,
                     feature_name=prepared.name,
+                    feature=feature,
                     output_crs=self._resolve_output_crs(config.output_crs_authid),
                 )
                 self._export_layout_image(prepared.layout, before_path, config.dpi)
@@ -454,6 +455,7 @@ class ArchAutoMapEngine:
         prepared: _PreparedRender,
         config: ExportConfig,
         feature_name: str,
+        feature: QgsFeature,
         output_crs: QgsCoordinateReferenceSystem,
     ) -> list[str]:
         """Before 도면을 렌더링한다.
@@ -468,6 +470,7 @@ class ArchAutoMapEngine:
             layer = self._create_temp_before_layer(
                 before_cfg=before_cfg,
                 feature_name=feature_name,
+                feature=feature,
                 output_crs=output_crs,
                 config=config,
             )
@@ -491,13 +494,11 @@ class ArchAutoMapEngine:
         self,
         before_cfg: BeforeLayerConfig,
         feature_name: str,
+        feature: QgsFeature,
         output_crs: QgsCoordinateReferenceSystem,
         config: ExportConfig,
     ) -> "QgsVectorLayer | None":
-        """Before 레이어에서 이름이 일치하는 피처를 찾아 임시 외곽선 레이어를 반환한다.
-
-        매칭 실패(0건 or 2건 이상) 시 None을 반환하고 로그만 남긴다.
-        """
+        """Before 레이어에서 이름이 일치하거나 공간적으로 중첩되는 피처를 찾아 임시 외곽선 레이어를 반환한다."""
         try:
             before_layer = self._require_vector_layer(before_cfg.layer_id, "이전 시기 레이어")
         except ArchAutoMapError as exc:
@@ -510,7 +511,7 @@ class ArchAutoMapEngine:
             )
             return None
 
-        # 이름 기반 매칭
+        # 1. 이름 기반 매칭 시도
         request = QgsFeatureRequest().setFilterExpression(
             QgsExpression.createFieldEqualityExpression(before_cfg.name_field, feature_name)
         )
@@ -526,8 +527,47 @@ class ArchAutoMapEngine:
                 safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
             matched.append(safe)
 
+        # 2. 이름 기반 매칭이 실패한 경우 공간적 겹침 매칭 시도 (70% 이상)
         if len(matched) == 0:
-            self.log(f"[Before] '{feature_name}' — '{before_layer.name()}'에서 매칭 피처 없음. 건너뜁니다.")
+            try:
+                fill_layer = self._require_vector_layer(config.fill_layer_id, "유적 채움")
+                after_crs = fill_layer.crs()
+                before_crs = before_layer.crs()
+                after_geom_in_before = self._transform_geometry(feature.geometry(), after_crs, before_crs)
+
+                if not after_geom_in_before.isEmpty():
+                    spatial_req = QgsFeatureRequest().setFilterRect(after_geom_in_before.boundingBox())
+                    for feat in before_layer.getFeatures(spatial_req):
+                        feat_geom = feat.geometry()
+                        if feat_geom.isNull() or feat_geom.isEmpty():
+                            continue
+                        intersection = feat_geom.intersection(after_geom_in_before)
+                        if intersection.isEmpty():
+                            continue
+                        feat_area = feat_geom.area()
+                        if feat_area <= 0:
+                            continue
+                        overlap_ratio = intersection.area() / feat_area
+                        if overlap_ratio >= 0.70:
+                            safe = QgsFeature(fields)
+                            safe.setGeometry(feat.geometry())
+                            attrs = feat.attributes()
+                            if len(attrs) >= fields.count():
+                                safe.setAttributes(attrs[:fields.count()])
+                            else:
+                                safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
+                            matched.append(safe)
+                            
+                            before_name = feat[before_cfg.name_field] if before_cfg.name_field in fields.names() else "Unknown"
+                            self.log(
+                                f"[Before] '{feature_name}' 이름 매칭 없음 -> 공간 매칭 성공 (중첩률 {overlap_ratio*100:.1f}%): '{before_name}'"
+                            )
+                            break  # 70% 이상 매칭되는 첫 번째 항목을 사용
+            except Exception as exc:
+                self.log(f"[Before] 공간 매칭 시도 중 오류 발생: {exc}")
+
+        if len(matched) == 0:
+            self.log(f"[Before] '{feature_name}' — '{before_layer.name()}'에서 매칭 피처(이름/공간) 없음. 건너뜁니다.")
             return None
         if len(matched) > 1:
             self.log(
