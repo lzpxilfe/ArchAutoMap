@@ -527,8 +527,10 @@ class ArchAutoMapEngine:
                 safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
             matched.append(safe)
 
-        # 이름 매칭된 결과가 2개 이상일 때, After 유적과의 공간 유사도(중첩 면적 순, 중심점 거리 순)로 정렬하여 최적 피처 선택
-        if len(matched) > 1:
+        # 이름 매칭된 피처들에 대해 공간적 연관성 검증 (Safety Check)
+        # 이름은 일치하지만 After 유적과 공간적으로 멀리 떨어진 엉뚱한 피처는 제외합니다.
+        # 여러 개가 남은 경우 공간 유사도(겹침 면적 순, 중심점 거리 순)로 정렬합니다.
+        if len(matched) > 0:
             try:
                 fill_layer = self._require_vector_layer(config.fill_layer_id, "유적 채움")
                 after_crs = fill_layer.crs()
@@ -538,23 +540,47 @@ class ArchAutoMapEngine:
                     after_geom_in_before = self._transform_geometry(raw_after_geom, after_crs, before_crs)
                     if not after_geom_in_before.isEmpty():
                         after_geom_valid = after_geom_in_before.makeValid()
-                        def sort_key(f):
+                        
+                        valid_matches = []
+                        for f in matched:
                             geom = f.geometry()
                             if geom.isNull() or geom.isEmpty():
-                                return (0.0, float('inf'))
+                                continue
                             geom_valid = geom.makeValid()
                             intersection = geom_valid.intersection(after_geom_valid)
-                            intersect_area = intersection.area() if not intersection.isEmpty() else 0.0
+                            is_overlapping = not intersection.isEmpty() and intersection.area() > 0.0
                             dist = geom_valid.centroid().distance(after_geom_valid.centroid())
-                            return (-intersect_area, dist)
+                            
+                            # 공간적으로 겹치거나, 중심점 기준 150m 이내에 인접한 경우만 유효 매칭으로 인정
+                            if is_overlapping or dist <= 150.0:
+                                valid_matches.append(f)
+                            else:
+                                before_name = f[before_cfg.name_field] if before_cfg.name_field in fields.names() else "Unknown"
+                                self.log(
+                                    f"[Before] '{feature_name}' ➔ '{before_name}': 이름은 일치하나 "
+                                    f"공간 연관성 없음(중첩 안 됨, 거리 {dist:.1f}m > 150m). 매칭에서 제외합니다."
+                                )
                         
-                        matched.sort(key=sort_key)
-                        self.log(
-                            f"[Before] '{feature_name}' 이름 중복 매칭 {len(matched)}건 발생. "
-                            f"After 유적과의 공간 유사도가 가장 높은 피처를 선택하여 매칭했습니다."
-                        )
+                        matched = valid_matches
+                        
+                        # 2개 이상인 경우 정렬
+                        if len(matched) > 1:
+                            def sort_key(f):
+                                geom = f.geometry()
+                                if geom.isNull() or geom.isEmpty():
+                                    return (0.0, float('inf'))
+                                geom_valid = geom.makeValid()
+                                intersection = geom_valid.intersection(after_geom_valid)
+                                intersect_area = intersection.area() if not intersection.isEmpty() else 0.0
+                                dist = geom_valid.centroid().distance(after_geom_valid.centroid())
+                                return (-intersect_area, dist)
+                            matched.sort(key=sort_key)
+                            self.log(
+                                f"[Before] '{feature_name}' 이름 중복 매칭 {len(matched)}건 발생. "
+                                f"After 유적과의 공간 유사도가 가장 높은 피처를 정렬하여 선택했습니다."
+                            )
             except Exception as exc:
-                self.log(f"[Before] 이름 중복 매칭 정렬 중 오류 발생 (기본 순서 적용): {exc}")
+                self.log(f"[Before] 이름 매칭 공간 검증 중 오류 발생 (기본 매칭 유지): {exc}")
 
         # 2. 이름 기반 매칭이 실패한 경우 공간적 겹침 매칭 시도 (70% 이상)
         if len(matched) == 0:
