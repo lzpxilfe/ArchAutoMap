@@ -556,9 +556,20 @@ class ArchAutoMapEngine:
                             intersect_area = intersection.area()
                             ratio_before = intersect_area / feat_area
                             ratio_after = intersect_area / after_area
-                            overlap_ratio = max(ratio_before, ratio_after)
                             
-                            if overlap_ratio >= 0.70:
+                            # 오매칭 필터링 조건 적용 (느티나무, 노거수 등 미세 객체 배제)
+                            # 1) After 유적 영역의 70% 이상을 Before 피처가 덮고 있는 경우 (Before가 더 크거나 비슷함)
+                            # 2) Before 피처 영역의 70% 이상을 After 유적이 덮고 있되, Before 피처 면적이 After 유적 면적의 최소 10% 이상인 경우
+                            is_matched = False
+                            match_reason = ""
+                            if ratio_after >= 0.70:
+                                is_matched = True
+                                match_reason = f"After 기준 중첩률 {ratio_after*100:.1f}% >= 70%"
+                            elif ratio_before >= 0.70 and (feat_area / after_area >= 0.10):
+                                is_matched = True
+                                match_reason = f"Before 기준 중첩률 {ratio_before*100:.1f}% >= 70% (면적비 {feat_area/after_area*100:.1f}% >= 10%)"
+
+                            if is_matched:
                                 safe = QgsFeature(fields)
                                 safe.setGeometry(feat.geometry())
                                 attrs = feat.attributes()
@@ -570,9 +581,9 @@ class ArchAutoMapEngine:
                                 
                                 before_name = feat[before_cfg.name_field] if before_cfg.name_field in fields.names() else "Unknown"
                                 self.log(
-                                    f"[Before] '{feature_name}' 이름 매칭 없음 -> 공간 매칭 성공 (중첩률: Before {ratio_before*100:.1f}%, After {ratio_after*100:.1f}%, 결정기준 {overlap_ratio*100:.1f}%): '{before_name}'"
+                                    f"[Before] '{feature_name}' 이름 매칭 없음 -> 공간 매칭 성공 ({match_reason}): '{before_name}'"
                                 )
-                                break  # 70% 이상 매칭되는 첫 번째 항목을 사용
+                                break  # 매칭되는 첫 번째 항목을 사용
             except Exception as exc:
                 self.log(f"[Before] 공간 매칭 시도 중 오류 발생: {exc}")
 
