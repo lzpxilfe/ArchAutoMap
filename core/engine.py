@@ -568,12 +568,15 @@ class ArchAutoMapEngine:
                                 f"면적 비율(Before/After) {feat_area/after_area*100:.1f}%"
                             )
                             
-                            # 오매칭 필터링 조건 적용 (느티나무, 노거수 등 미세 객체 배제)
+                            # 오매칭 필터링 조건 적용 (느티나무 등 미세 객체 및 광역 보존구역 등 거대 객체 배제)
+                            # 1) After 유적 영역의 70% 이상을 Before 피처가 덮고 있는 경우 (Before가 더 크거나 비슷함)
+                            #    단, Before 피처가 너무 거대하면 안 됨 (면적비 300% 이하)
+                            # 2) Before 피처 영역의 70% 이상을 After 유적이 덮고 있되, Before 피처 면적이 After 유적 면적의 최소 10% 이상인 경우
                             is_matched = False
                             match_reason = ""
-                            if ratio_after >= 0.70:
+                            if ratio_after >= 0.70 and (feat_area / after_area <= 3.0):
                                 is_matched = True
-                                match_reason = f"After 기준 중첩률 {ratio_after*100:.1f}% >= 70%"
+                                match_reason = f"After 기준 중첩률 {ratio_after*100:.1f}% >= 70% (면적비 {feat_area/after_area*100:.1f}% <= 300%)"
                             elif ratio_before >= 0.70 and (feat_area / after_area >= 0.10):
                                 is_matched = True
                                 match_reason = f"Before 기준 중첩률 {ratio_before*100:.1f}% >= 70% (면적비 {feat_area/after_area*100:.1f}% >= 10%)"
