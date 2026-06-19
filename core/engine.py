@@ -546,20 +546,29 @@ class ArchAutoMapEngine:
                                 continue
                             feat_geom_valid = feat_geom.makeValid()
                             intersection = feat_geom_valid.intersection(after_geom_valid)
+                            
+                            before_name = feat[before_cfg.name_field] if before_cfg.name_field in fields.names() else "Unknown"
                             if intersection.isEmpty():
+                                self.log(f"[Before] '{feature_name}' ➔ '{before_name}': 공간적으로 겹치는 영역이 전혀 없습니다.")
                                 continue
+                            
                             feat_area = feat_geom_valid.area()
                             after_area = after_geom_valid.area()
                             if feat_area <= 0 or after_area <= 0:
+                                self.log(f"[Before] '{feature_name}' ➔ '{before_name}': 면적 계산 오류 (feat_area={feat_area}, after_area={after_area})")
                                 continue
                             
                             intersect_area = intersection.area()
                             ratio_before = intersect_area / feat_area
                             ratio_after = intersect_area / after_area
                             
+                            self.log(
+                                f"[Before] '{feature_name}' ➔ '{before_name}' 공간 분석: "
+                                f"Before 중첩률 {ratio_before*100:.1f}%, After 중첩률 {ratio_after*100:.1f}%, "
+                                f"면적 비율(Before/After) {feat_area/after_area*100:.1f}%"
+                            )
+                            
                             # 오매칭 필터링 조건 적용 (느티나무, 노거수 등 미세 객체 배제)
-                            # 1) After 유적 영역의 70% 이상을 Before 피처가 덮고 있는 경우 (Before가 더 크거나 비슷함)
-                            # 2) Before 피처 영역의 70% 이상을 After 유적이 덮고 있되, Before 피처 면적이 After 유적 면적의 최소 10% 이상인 경우
                             is_matched = False
                             match_reason = ""
                             if ratio_after >= 0.70:
@@ -579,11 +588,12 @@ class ArchAutoMapEngine:
                                     safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
                                 matched.append(safe)
                                 
-                                before_name = feat[before_cfg.name_field] if before_cfg.name_field in fields.names() else "Unknown"
                                 self.log(
-                                    f"[Before] '{feature_name}' 이름 매칭 없음 -> 공간 매칭 성공 ({match_reason}): '{before_name}'"
+                                    f"[Before] '{feature_name}' 공간 매칭 성공 ({match_reason}): '{before_name}'"
                                 )
                                 break  # 매칭되는 첫 번째 항목을 사용
+                            else:
+                                self.log(f"[Before] '{feature_name}' ➔ '{before_name}': 중첩 조건(70% 및 면적비 10%) 미달로 매칭 제외.")
             except Exception as exc:
                 self.log(f"[Before] 공간 매칭 시도 중 오류 발생: {exc}")
 
