@@ -533,36 +533,46 @@ class ArchAutoMapEngine:
                 fill_layer = self._require_vector_layer(config.fill_layer_id, "유적 채움")
                 after_crs = fill_layer.crs()
                 before_crs = before_layer.crs()
-                after_geom_in_before = self._transform_geometry(feature.geometry(), after_crs, before_crs)
+                raw_after_geom = feature.geometry()
+                if raw_after_geom and not raw_after_geom.isEmpty():
+                    after_geom_in_before = self._transform_geometry(raw_after_geom, after_crs, before_crs)
 
-                if not after_geom_in_before.isEmpty():
-                    spatial_req = QgsFeatureRequest().setFilterRect(after_geom_in_before.boundingBox())
-                    for feat in before_layer.getFeatures(spatial_req):
-                        feat_geom = feat.geometry()
-                        if feat_geom.isNull() or feat_geom.isEmpty():
-                            continue
-                        intersection = feat_geom.intersection(after_geom_in_before)
-                        if intersection.isEmpty():
-                            continue
-                        feat_area = feat_geom.area()
-                        if feat_area <= 0:
-                            continue
-                        overlap_ratio = intersection.area() / feat_area
-                        if overlap_ratio >= 0.70:
-                            safe = QgsFeature(fields)
-                            safe.setGeometry(feat.geometry())
-                            attrs = feat.attributes()
-                            if len(attrs) >= fields.count():
-                                safe.setAttributes(attrs[:fields.count()])
-                            else:
-                                safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
-                            matched.append(safe)
+                    if not after_geom_in_before.isEmpty():
+                        after_geom_valid = after_geom_in_before.makeValid()
+                        spatial_req = QgsFeatureRequest().setFilterRect(after_geom_valid.boundingBox())
+                        for feat in before_layer.getFeatures(spatial_req):
+                            feat_geom = feat.geometry()
+                            if feat_geom.isNull() or feat_geom.isEmpty():
+                                continue
+                            feat_geom_valid = feat_geom.makeValid()
+                            intersection = feat_geom_valid.intersection(after_geom_valid)
+                            if intersection.isEmpty():
+                                continue
+                            feat_area = feat_geom_valid.area()
+                            after_area = after_geom_valid.area()
+                            if feat_area <= 0 or after_area <= 0:
+                                continue
                             
-                            before_name = feat[before_cfg.name_field] if before_cfg.name_field in fields.names() else "Unknown"
-                            self.log(
-                                f"[Before] '{feature_name}' 이름 매칭 없음 -> 공간 매칭 성공 (중첩률 {overlap_ratio*100:.1f}%): '{before_name}'"
-                            )
-                            break  # 70% 이상 매칭되는 첫 번째 항목을 사용
+                            intersect_area = intersection.area()
+                            ratio_before = intersect_area / feat_area
+                            ratio_after = intersect_area / after_area
+                            overlap_ratio = max(ratio_before, ratio_after)
+                            
+                            if overlap_ratio >= 0.70:
+                                safe = QgsFeature(fields)
+                                safe.setGeometry(feat.geometry())
+                                attrs = feat.attributes()
+                                if len(attrs) >= fields.count():
+                                    safe.setAttributes(attrs[:fields.count()])
+                                else:
+                                    safe.setAttributes(attrs + [None] * (fields.count() - len(attrs)))
+                                matched.append(safe)
+                                
+                                before_name = feat[before_cfg.name_field] if before_cfg.name_field in fields.names() else "Unknown"
+                                self.log(
+                                    f"[Before] '{feature_name}' 이름 매칭 없음 -> 공간 매칭 성공 (중첩률: Before {ratio_before*100:.1f}%, After {ratio_after*100:.1f}%, 결정기준 {overlap_ratio*100:.1f}%): '{before_name}'"
+                                )
+                                break  # 70% 이상 매칭되는 첫 번째 항목을 사용
             except Exception as exc:
                 self.log(f"[Before] 공간 매칭 시도 중 오류 발생: {exc}")
 
