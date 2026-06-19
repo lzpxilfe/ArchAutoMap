@@ -43,6 +43,9 @@ class BeforeLayerConfig:
 
     layer_id: str    # QGIS 레이어 ID
     name_field: str  # before 레이어 내에서 유적명을 담은 속성 필드명
+    apply_outline_style: bool = True
+    outline_color_hex: str = "#E53935"
+    outline_width_mm: float = 0.6
 
 
 @dataclass(frozen=True)

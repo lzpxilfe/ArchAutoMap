@@ -205,7 +205,7 @@ class AttributeRuleRow(QFrame):
 
 
 class BeforeLayerRow(QFrame):
-    """이전 시기 레이어 한 행 — 레이어 선택 + 이름 필드 선택 + 삭제 버튼."""
+    """이전 시기 레이어 한 행 — 레이어 선택 + 이름 필드 선택 + 삭제 버튼 + 스타일 제어."""
 
     changed = pyqtSignal()
     removed = pyqtSignal(object)
@@ -214,9 +214,13 @@ class BeforeLayerRow(QFrame):
         super().__init__(parent)
         self.setObjectName("RuleRow")
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+        main_layout.setSpacing(4)
+
+        # 1행: 레이어 선택 + 이름 필드 선택 + 삭제 버튼
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(6)
 
         # 레이어 선택
         self.layer_combo = QgsMapLayerComboBox()
@@ -234,16 +238,51 @@ class BeforeLayerRow(QFrame):
         self.remove_button.setFixedWidth(32)
         self.remove_button.setToolTip("이 행 삭제")
 
-        layout.addWidget(self.layer_combo, 3)
-        layout.addWidget(self.field_combo, 2)
-        layout.addWidget(self.remove_button)
+        row1_layout.addWidget(self.layer_combo, 3)
+        row1_layout.addWidget(self.field_combo, 2)
+        row1_layout.addWidget(self.remove_button)
+        main_layout.addLayout(row1_layout)
+
+        # 2행: 스타일 적용 제어
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(6)
+
+        self.apply_style_cb = QCheckBox("외곽선 스타일 적용")
+        self.apply_style_cb.setChecked(True)
+        self.apply_style_cb.setToolTip("체크 해제 시 원본 레이어의 스타일을 그대로 복제하여 적용합니다.")
+
+        self._outline_color = QColor(DEFAULT_BEFORE_OUTLINE_COLOR_HEX)
+        self.color_button = QPushButton()
+        self.color_button.setObjectName("ColorButton")
+        self.color_button.setFixedWidth(80)
+
+        self.width_spin = QDoubleSpinBox()
+        self.width_spin.setRange(0.1, 10.0)
+        self.width_spin.setSingleStep(0.1)
+        self.width_spin.setValue(0.6)
+        self.width_spin.setSuffix(" mm")
+        self.width_spin.setFixedWidth(80)
+        self.width_spin.setToolTip("외곽선 두께")
+
+        row2_layout.addWidget(self.apply_style_cb)
+        row2_layout.addWidget(self.color_button)
+        row2_layout.addWidget(self.width_spin)
+        row2_layout.addStretch(1)
+        main_layout.addLayout(row2_layout)
 
         self.layer_combo.layerChanged.connect(self._on_layer_changed)
         self.layer_combo.layerChanged.connect(self.changed.emit)
         self.field_combo.currentIndexChanged.connect(self.changed.emit)
         self.remove_button.clicked.connect(lambda: self.removed.emit(self))
 
+        self.apply_style_cb.stateChanged.connect(self._on_apply_style_changed)
+        self.apply_style_cb.stateChanged.connect(self.changed.emit)
+        self.color_button.clicked.connect(self._choose_color)
+        self.width_spin.valueChanged.connect(self.changed.emit)
+
         self._on_layer_changed(self.layer_combo.currentLayer())
+        self._apply_button_color()
+        self._on_apply_style_changed()
 
     # ── 공개 인터페이스 ───────────────────────────────────────────
 
@@ -255,9 +294,22 @@ class BeforeLayerRow(QFrame):
         name_field = self.field_combo.currentData() or self.field_combo.currentText().strip()
         if not name_field:
             return None
-        return BeforeLayerConfig(layer_id=layer.id(), name_field=name_field)
+        return BeforeLayerConfig(
+            layer_id=layer.id(),
+            name_field=name_field,
+            apply_outline_style=self.apply_style_cb.isChecked(),
+            outline_color_hex=self._outline_color.name(),
+            outline_width_mm=self.width_spin.value(),
+        )
 
-    def restore(self, layer_id: str, name_field: str):
+    def restore(
+        self,
+        layer_id: str,
+        name_field: str,
+        apply_outline_style: bool = True,
+        outline_color_hex: str = "#E53935",
+        outline_width_mm: float = 0.6,
+    ):
         """저장된 설정을 UI에 복원한다."""
         layer = QgsProject.instance().mapLayer(layer_id)
         if layer is not None:
@@ -270,6 +322,38 @@ class BeforeLayerRow(QFrame):
             idx2 = self.field_combo.findText(name_field)
             if idx2 >= 0:
                 self.field_combo.setCurrentIndex(idx2)
+
+        self.apply_style_cb.setChecked(apply_outline_style)
+        self._outline_color = QColor(outline_color_hex)
+        self._apply_button_color()
+        self.width_spin.setValue(outline_width_mm)
+        self._on_apply_style_changed()
+
+    def _on_apply_style_changed(self):
+        enabled = self.apply_style_cb.isChecked()
+        self.color_button.setEnabled(enabled)
+        self.width_spin.setEnabled(enabled)
+
+    def _choose_color(self):
+        color = QColorDialog.getColor(self._outline_color, self, COLOR_DIALOG_TITLE)
+        if not color.isValid():
+            return
+        self._outline_color = color
+        self._apply_button_color()
+        self.changed.emit()
+
+    def _apply_button_color(self):
+        self.color_button.setText(self._outline_color.name().upper())
+        foreground = (
+            COLOR_BUTTON_TEXT_DARK
+            if self._outline_color.lightness() < COLOR_BUTTON_LIGHTNESS_THRESHOLD
+            else COLOR_BUTTON_TEXT_LIGHT
+        )
+        self.color_button.setStyleSheet(
+            build_color_button_stylesheet(
+                self._outline_color.name(), foreground, DOCK_PALETTE.color_button_border,
+            )
+        )
 
     # ── 내부 ─────────────────────────────────────────────────────
 
@@ -697,12 +781,25 @@ class ArchAutoMapDockWidget(QDockWidget):
 
         return self.before_group
 
-    def _add_before_layer_row(self, layer_id: str = "", name_field: str = "") -> BeforeLayerRow:
+    def _add_before_layer_row(
+        self,
+        layer_id: str = "",
+        name_field: str = "",
+        apply_outline_style: bool = True,
+        outline_color_hex: str = "#E53935",
+        outline_width_mm: float = 0.6,
+    ) -> BeforeLayerRow:
         if len(self._before_layer_rows) >= MAX_BEFORE_LAYERS:
             return None
         row = BeforeLayerRow(parent=self.before_rows_container)
         if layer_id:
-            row.restore(layer_id, name_field)
+            row.restore(
+                layer_id=layer_id,
+                name_field=name_field,
+                apply_outline_style=apply_outline_style,
+                outline_color_hex=outline_color_hex,
+                outline_width_mm=outline_width_mm,
+            )
         row.changed.connect(self._persist_state)
         row.removed.connect(self._remove_before_layer_row)
         self._before_layer_rows.append(row)
@@ -1309,7 +1406,13 @@ class ArchAutoMapDockWidget(QDockWidget):
         self.settings.set_json(
             SettingsKey.BEFORE_LAYER_CONFIGS,
             [
-                {"layer_id": row.layer_combo.currentLayer().id(), "name_field": row.field_combo.currentData() or ""}
+                {
+                    "layer_id": row.layer_combo.currentLayer().id(),
+                    "name_field": row.field_combo.currentData() or "",
+                    "apply_outline_style": row.apply_style_cb.isChecked(),
+                    "outline_color_hex": row._outline_color.name(),
+                    "outline_width_mm": row.width_spin.value(),
+                }
                 for row in self._before_layer_rows
                 if row.layer_combo.currentLayer() is not None
             ],
@@ -1392,8 +1495,17 @@ class ArchAutoMapDockWidget(QDockWidget):
         for bc in before_configs:
             layer_id = str(bc.get("layer_id", "")).strip()
             name_field = str(bc.get("name_field", "")).strip()
+            apply_outline_style = bc.get("apply_outline_style", True)
+            outline_color_hex = str(bc.get("outline_color_hex", "#E53935")).strip()
+            outline_width_mm = float(bc.get("outline_width_mm", 0.6))
             if layer_id:
-                self._add_before_layer_row(layer_id=layer_id, name_field=name_field)
+                self._add_before_layer_row(
+                    layer_id=layer_id,
+                    name_field=name_field,
+                    apply_outline_style=apply_outline_style,
+                    outline_color_hex=outline_color_hex,
+                    outline_width_mm=outline_width_mm,
+                )
 
     def _set_layer_if_present(self, combo: QgsMapLayerComboBox, layer_id: str):
         if not layer_id:

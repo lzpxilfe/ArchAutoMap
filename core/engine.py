@@ -27,6 +27,7 @@ from qgis.core import (
 from .constants import (
     AUTO_LAYOUT_NAME,
     AUTO_MAP_ITEM_ID,
+    DEFAULT_BEFORE_OUTLINE_COLOR_HEX,
     MAX_FEATURE_SEARCH_RESULTS,
     MEMORY_LAYER_PROVIDER,
     MIN_FEATURE_SEARCH_CHARS,
@@ -547,17 +548,22 @@ class ArchAutoMapEngine:
             output_crs=output_crs,
             name=f"{TEMP_BEFORE_LAYER_PREFIX}{feature_name}",
         )
-        # 스타일: 투명 채움 + 외곽선 (after의 outline 스타일 그대로)
-        layer.renderer().setSymbol(
-            QgsFillSymbol.createSimple(
-                {
-                    "color": TRANSPARENT_FILL_COLOR,
-                    "outline_color": config.style.outline_color_hex,
-                    "outline_width": str(config.style.outline_width_mm),
-                    "outline_width_unit": SYMBOL_SIZE_UNIT_MM,
-                }
+        # 스타일링 적용 분기
+        if before_cfg.apply_outline_style:
+            layer.renderer().setSymbol(
+                QgsFillSymbol.createSimple(
+                    {
+                        "color": TRANSPARENT_FILL_COLOR,
+                        "outline_color": before_cfg.outline_color_hex,
+                        "outline_width": str(before_cfg.outline_width_mm),
+                        "outline_width_unit": SYMBOL_SIZE_UNIT_MM,
+                    }
+                )
             )
-        )
+        else:
+            # 사용자가 이미 그 방향을 정해서 수정해둔상태라면 안건드리고 원본 스타일 유지
+            if before_layer.renderer():
+                layer.setRenderer(before_layer.renderer().clone())
         return layer
 
     def _cleanup_render(self, prepared: _PreparedRender):
