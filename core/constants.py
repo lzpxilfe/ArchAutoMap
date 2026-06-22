@@ -80,6 +80,12 @@ TEMP_BEFORE_LAYER_PREFIX = "ArchAutoMap Before "
 # Before 레이어 (이전 시기 도면) 관련
 MAX_BEFORE_LAYERS = 5
 
+# Before 레이어 매칭 및 검증용 기하학적 임계값 (하드코딩 방지)
+BEFORE_SPATIAL_VERIFY_MAX_DIST_M = 150.0  # 이름 일치 시 허용할 최대 중심거리 (m)
+BEFORE_SPATIAL_MIN_OVERLAP_RATIO = 0.70   # 공간 매칭 시 요구되는 최소 중첩 비율 (70%)
+BEFORE_SPATIAL_MIN_AREA_RATIO = 0.10      # 공간 매칭 시 Before 면적이 After 면적의 최소 10% 이상이어야 함
+BEFORE_SPATIAL_MAX_AREA_RATIO = 3.0       # 공간 매칭 시 Before 면적이 After 면적의 최대 300% 이하이어야 함
+
 # 미리보기 임시 파일 접두사
 PREVIEW_TEMP_FILE_PREFIX = "archautomap_preview_"
 

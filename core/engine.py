@@ -27,6 +27,10 @@ from qgis.core import (
 from .constants import (
     AUTO_LAYOUT_NAME,
     AUTO_MAP_ITEM_ID,
+    BEFORE_SPATIAL_MAX_AREA_RATIO,
+    BEFORE_SPATIAL_MIN_AREA_RATIO,
+    BEFORE_SPATIAL_MIN_OVERLAP_RATIO,
+    BEFORE_SPATIAL_VERIFY_MAX_DIST_M,
     DEFAULT_BEFORE_OUTLINE_COLOR_HEX,
     MAX_FEATURE_SEARCH_RESULTS,
     MEMORY_LAYER_PROVIDER,
@@ -570,14 +574,14 @@ class ArchAutoMapEngine:
                             is_overlapping = not intersection.isEmpty() and intersection.area() > 0.0
                             dist = geom_valid.centroid().distance(after_geom_valid.centroid())
                             
-                            # 공간적으로 겹치거나, 중심점 기준 150m 이내에 인접한 경우만 유효 매칭으로 인정
-                            if is_overlapping or dist <= 150.0:
+                            # 공간적으로 겹치거나, 중심점 기준 BEFORE_SPATIAL_VERIFY_MAX_DIST_M 이내에 인접한 경우만 유효 매칭으로 인정
+                            if is_overlapping or dist <= BEFORE_SPATIAL_VERIFY_MAX_DIST_M:
                                 valid_matches.append(f)
                             else:
                                 before_name = f[before_cfg.name_field] if before_cfg.name_field in fields.names() else "Unknown"
                                 self.log(
                                     f"[Before] '{feature_name}' ➔ '{before_name}': 이름은 일치하나 "
-                                    f"공간 연관성 없음(중첩 안 됨, 거리 {dist:.1f}m > 150m). 매칭에서 제외합니다."
+                                    f"공간 연관성 없음(중첩 안 됨, 거리 {dist:.1f}m > {BEFORE_SPATIAL_VERIFY_MAX_DIST_M}m). 매칭에서 제외합니다."
                                 )
                         
                         matched = valid_matches
@@ -643,17 +647,17 @@ class ArchAutoMapEngine:
                             )
                             
                             # 오매칭 필터링 조건 적용 (느티나무 등 미세 객체 및 광역 보존구역 등 거대 객체 배제)
-                            # 1) After 유적 영역의 70% 이상을 Before 피처가 덮고 있는 경우 (Before가 더 크거나 비슷함)
-                            #    단, Before 피처가 너무 거대하면 안 됨 (면적비 300% 이하)
-                            # 2) Before 피처 영역의 70% 이상을 After 유적이 덮고 있되, Before 피처 면적이 After 유적 면적의 최소 10% 이상인 경우
+                            # 1) After 유적 영역의 BEFORE_SPATIAL_MIN_OVERLAP_RATIO 이상을 Before 피처가 덮고 있는 경우 (Before가 더 크거나 비슷함)
+                            #    단, Before 피처가 너무 거대하면 안 됨 (면적비 BEFORE_SPATIAL_MAX_AREA_RATIO 이하)
+                            # 2) Before 피처 영역의 BEFORE_SPATIAL_MIN_OVERLAP_RATIO 이상을 After 유적이 덮고 있되, Before 피처 면적이 After 유적 면적의 최소 BEFORE_SPATIAL_MIN_AREA_RATIO 이상인 경우
                             is_matched = False
                             match_reason = ""
-                            if ratio_after >= 0.70 and (feat_area / after_area <= 3.0):
+                            if ratio_after >= BEFORE_SPATIAL_MIN_OVERLAP_RATIO and (feat_area / after_area <= BEFORE_SPATIAL_MAX_AREA_RATIO):
                                 is_matched = True
-                                match_reason = f"After 기준 중첩률 {ratio_after*100:.1f}% >= 70% (면적비 {feat_area/after_area*100:.1f}% <= 300%)"
-                            elif ratio_before >= 0.70 and (feat_area / after_area >= 0.10):
+                                match_reason = f"After 기준 중첩률 {ratio_after*100:.1f}% >= {BEFORE_SPATIAL_MIN_OVERLAP_RATIO*100:.0f}% (면적비 {feat_area/after_area*100:.1f}% <= {BEFORE_SPATIAL_MAX_AREA_RATIO*100:.0f}%)"
+                            elif ratio_before >= BEFORE_SPATIAL_MIN_OVERLAP_RATIO and (feat_area / after_area >= BEFORE_SPATIAL_MIN_AREA_RATIO):
                                 is_matched = True
-                                match_reason = f"Before 기준 중첩률 {ratio_before*100:.1f}% >= 70% (면적비 {feat_area/after_area*100:.1f}% >= 10%)"
+                                match_reason = f"Before 기준 중첩률 {ratio_before*100:.1f}% >= {BEFORE_SPATIAL_MIN_OVERLAP_RATIO*100:.0f}% (면적비 {feat_area/after_area*100:.1f}% >= {BEFORE_SPATIAL_MIN_AREA_RATIO*100:.0f}%)"
 
                             if is_matched:
                                 safe = QgsFeature(fields)
@@ -670,7 +674,9 @@ class ArchAutoMapEngine:
                                 )
                                 break  # 매칭되는 첫 번째 항목을 사용
                             else:
-                                self.log(f"[Before] '{feature_name}' ➔ '{before_name}': 중첩 조건(70% 및 면적비 10%) 미달로 매칭 제외.")
+                                self.log(
+                                    f"[Before] '{feature_name}' ➔ '{before_name}': 중첩 조건(중첩률 {BEFORE_SPATIAL_MIN_OVERLAP_RATIO*100:.0f}% 및 면적비 {BEFORE_SPATIAL_MIN_AREA_RATIO*100:.0f}%~{BEFORE_SPATIAL_MAX_AREA_RATIO*100:.0f}%) 미달로 매칭 제외."
+                                )
             except Exception as exc:
                 self.log(f"[Before] 공간 매칭 시도 중 오류 발생: {exc}")
 
