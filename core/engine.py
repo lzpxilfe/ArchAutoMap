@@ -346,7 +346,26 @@ class ArchAutoMapEngine:
             raise ArchAutoMapError(f"빈 geometry입니다: {raw_name}")
 
         area_m2 = self._resolve_area(config, feature, fill_geometry, fill_layer)
-        bbox = fill_geometry.boundingBox()
+        
+        # ── 축척 및 뷰포트 결정을 위한 대표(본체) geometry 추출 ────────────────
+        # MultiPolygon의 경우 노이즈 성격의 멀리 떨어진 미세 파편으로 인해 뷰포트가 과도하게 넓어지는 현상을 방지합니다.
+        main_geometry = fill_geometry
+        if fill_geometry.isMultipart():
+            try:
+                max_area = -1.0
+                main_part = None
+                for part in fill_geometry.parts():
+                    part_geom = QgsGeometry(part.clone())
+                    part_area = part_geom.area()
+                    if part_area > max_area:
+                        max_area = part_area
+                        main_part = part_geom
+                if main_part:
+                    main_geometry = main_part
+            except Exception as exc:
+                self.log(f"본체 geometry 추출 실패 (전체 기준 적용): {exc}")
+
+        bbox = main_geometry.boundingBox()
         if bbox.width() <= 0 or bbox.height() <= 0:
             raise ArchAutoMapError(f"유효하지 않은 bbox입니다: {raw_name}")
 
