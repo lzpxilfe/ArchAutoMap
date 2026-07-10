@@ -124,6 +124,11 @@ ArchAutoMap은 원본 레이어에 필터를 직접 걸지 않습니다.
 - PDF 출력, 부분 선택 배치 출력, 더 다양한 템플릿 기능은 후속 버전에서 확장할 수 있습니다.
 
 ## 📚 Citation
+[![Cite this repository](https://img.shields.io/badge/Cite_this-repository-2ea44f?logo=github)](https://github.com/lzpxilfe/ArchAutoMap)
+[![Star this repository](https://img.shields.io/github/stars/lzpxilfe/ArchAutoMap?style=social)](https://github.com/lzpxilfe/ArchAutoMap)
+
+인용 메타데이터는 [CITATION.cff](CITATION.cff)에 보관합니다.
+
 
 연구, 보고서, 발표 자료에서 ArchAutoMap을 사용했다면 아래 저장소 또는 `CITATION.cff` 기준으로 인용해 주세요.
 
